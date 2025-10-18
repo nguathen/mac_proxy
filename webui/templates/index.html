@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HAProxy & Wireproxy Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .status-running {
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+        }
+        
+        .status-stopped {
+            background: #ef4444;
+            box-shadow: 0 0 10px #ef4444;
+        }
+        
+        .service-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .service-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .service-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #333;
+        }
+        
+        .service-info {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9em;
+            transition: all 0.3s;
+            flex: 1;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-warning {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .btn-info {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .config-editor {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin: 15px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .config-field {
+            margin-bottom: 15px;
+        }
+        
+        .config-field label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .config-field input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+        
+        .config-field input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: #999;
+        }
+        
+        .logs-container {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .alert-success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #10b981;
+        }
+        
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #ef4444;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .stats-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .stats-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 HAProxy & Wireproxy Manager</h1>
+            <p>Quản lý proxy system của bạn</p>
+        </div>
+        
+        <div class="grid">
+            <!-- Wireproxy Card -->
+            <div class="card">
+                <h2>🔐 Wireproxy Services</h2>
+                <div id="wireproxy-status"></div>
+                <div class="btn-group">
+                    <button class="btn btn-success" onclick="controlWireproxy('start')">Start All</button>
+                    <button class="btn btn-danger" onclick="controlWireproxy('stop')">Stop All</button>
+                    <button class="btn btn-warning" onclick="controlWireproxy('restart')">Restart All</button>
+                </div>
+            </div>
+            
+            <!-- HAProxy Card -->
+            <div class="card">
+                <h2>⚡ HAProxy Services</h2>
+                <div id="haproxy-status"></div>
+                <div class="btn-group">
+                    <button class="btn btn-success" onclick="controlHAProxy('start')">Start All</button>
+                    <button class="btn btn-danger" onclick="controlHAProxy('stop')">Stop All</button>
+                    <button class="btn btn-warning" onclick="controlHAProxy('restart')">Restart All</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Config Management -->
+        <div class="card">
+            <h2>⚙️ Configuration Management</h2>
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="openConfigModal(1)">Edit Wireproxy 1 Config</button>
+                <button class="btn btn-primary" onclick="openConfigModal(2)">Edit Wireproxy 2 Config</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Config Modal -->
+    <div id="config-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Configuration</h2>
+                <button class="modal-close" onclick="closeConfigModal()">&times;</button>
+            </div>
+            <div id="config-form"></div>
+        </div>
+    </div>
+    
+    <!-- Logs Modal -->
+    <div id="logs-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Service Logs</h2>
+                <button class="modal-close" onclick="closeLogsModal()">&times;</button>
+            </div>
+            <div class="logs-container" id="logs-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentInstance = null;
+        
+        // Load status on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStatus();
+            setInterval(loadStatus, 5000); // Refresh every 5 seconds
+        });
+        
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                // Update Wireproxy status
+                const wireproxyHtml = data.wireproxy.map(wp => `
+                    <div class="service-item">
+                        <div class="service-header">
+                            <span class="service-name">
+                                <span class="status-indicator ${wp.running ? 'status-running' : 'status-stopped'}"></span>
+                                ${wp.name}
+                            </span>
+                        </div>
+                        <div class="service-info">Port: ${wp.port}</div>
+                        <div class="service-info">Status: ${wp.running ? '✅ Running' : '❌ Stopped'}</div>
+                        ${wp.running ? `<div class="service-info">Connection: ${wp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
+                        ${wp.pid ? `<div class="service-info">PID: ${wp.pid}</div>` : ''}
+                        <div class="btn-group">
+                            <button class="btn btn-info" onclick="testProxy('${wp.port}')">Test</button>
+                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${wp.port === '18181' ? '1' : '2'}')">Logs</button>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('wireproxy-status').innerHTML = wireproxyHtml;
+                
+                // Update HAProxy status
+                const haproxyHtml = data.haproxy.map(hp => `
+                    <div class="service-item">
+                        <div class="service-header">
+                            <span class="service-name">
+                                <span class="status-indicator ${hp.running ? 'status-running' : 'status-stopped'}"></span>
+                                ${hp.name}
+                            </span>
+                        </div>
+                        <div class="service-info">Port: ${hp.port}</div>
+                        <div class="service-info">Status: ${hp.running ? '✅ Running' : '❌ Stopped'}</div>
+                        ${hp.pid ? `<div class="service-info">PID: ${hp.pid}</div>` : ''}
+                        ${hp.running ? `<a href="${hp.stats_url}" target="_blank" class="stats-link">📊 View Stats</a>` : ''}
+                        <div class="btn-group">
+                            <button class="btn btn-info" onclick="testProxy('${hp.port}')">Test</button>
+                            <button class="btn btn-primary" onclick="viewLogs('haproxy${hp.port === '7891' ? '1' : '2'}')">Logs</button>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('haproxy-status').innerHTML = haproxyHtml;
+                
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+        
+        async function controlWireproxy(action) {
+            if (!confirm(`Are you sure you want to ${action} all wireproxy instances?`)) return;
+            
+            try {
+                const response = await fetch(`/api/wireproxy/${action}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Wireproxy ${action} successful!`);
+                    loadStatus();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function controlHAProxy(action) {
+            if (!confirm(`Are you sure you want to ${action} all HAProxy instances?`)) return;
+            
+            try {
+                const response = await fetch(`/api/haproxy/${action}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`HAProxy ${action} successful!`);
+                    loadStatus();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function openConfigModal(instance) {
+            currentInstance = instance;
+            
+            try {
+                const response = await fetch(`/api/wireproxy/config/${instance}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const config = data.config;
+                    const formHtml = `
+                        <div id="config-alert"></div>
+                        <h3>Interface</h3>
+                        <div class="config-field">
+                            <label>Private Key:</label>
+                            <input type="text" id="privatekey" value="${config.interface.PrivateKey || ''}" />
+                        </div>
+                        <div class="config-field">
+                            <label>Address:</label>
+                            <input type="text" id="address" value="${config.interface.Address || ''}" />
+                        </div>
+                        <div class="config-field">
+                            <label>DNS:</label>
+                            <input type="text" id="dns" value="${config.interface.DNS || ''}" />
+                        </div>
+                        
+                        <h3>Peer</h3>
+                        <div class="config-field">
+                            <label>Public Key:</label>
+                            <input type="text" id="publickey" value="${config.peer.PublicKey || ''}" />
+                        </div>
+                        <div class="config-field">
+                            <label>Endpoint (IP:Port):</label>
+                            <input type="text" id="endpoint" value="${config.peer.Endpoint || ''}" placeholder="1.2.3.4:51820" />
+                        </div>
+                        <div class="config-field">
+                            <label>Allowed IPs:</label>
+                            <input type="text" id="allowedips" value="${config.peer.AllowedIPs || ''}" />
+                        </div>
+                        <div class="config-field">
+                            <label>Persistent Keepalive:</label>
+                            <input type="text" id="keepalive" value="${config.peer.PersistentKeepalive || ''}" />
+                        </div>
+                        
+                        <h3>SOCKS5</h3>
+                        <div class="config-field">
+                            <label>Bind Address:</label>
+                            <input type="text" id="bindaddress" value="${config.socks5.BindAddress || ''}" />
+                        </div>
+                        
+                        <div class="btn-group">
+                            <button class="btn btn-success" onclick="saveConfig()">Save & Restart</button>
+                            <button class="btn btn-danger" onclick="closeConfigModal()">Cancel</button>
+                        </div>
+                    `;
+                    
+                    document.getElementById('config-form').innerHTML = formHtml;
+                    document.getElementById('config-modal').classList.add('active');
+                } else {
+                    alert(`Error loading config: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        function closeConfigModal() {
+            document.getElementById('config-modal').classList.remove('active');
+            currentInstance = null;
+        }
+        
+        async function saveConfig() {
+            const config = {
+                interface: {
+                    PrivateKey: document.getElementById('privatekey').value,
+                    Address: document.getElementById('address').value,
+                    DNS: document.getElementById('dns').value
+                },
+                peer: {
+                    PublicKey: document.getElementById('publickey').value,
+                    Endpoint: document.getElementById('endpoint').value,
+                    AllowedIPs: document.getElementById('allowedips').value,
+                    PersistentKeepalive: document.getElementById('keepalive').value
+                },
+                socks5: {
+                    BindAddress: document.getElementById('bindaddress').value
+                }
+            };
+            
+            try {
+                // Save config
+                const saveResponse = await fetch(`/api/wireproxy/config/${currentInstance}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config })
+                });
+                const saveData = await saveResponse.json();
+                
+                if (!saveData.success) {
+                    throw new Error(saveData.error);
+                }
+                
+                // Show success message
+                document.getElementById('config-alert').innerHTML = '<div class="alert alert-success">Config saved! Restarting wireproxy...</div>';
+                
+                // Restart wireproxy
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const restartResponse = await fetch('/api/wireproxy/restart', { method: 'POST' });
+                const restartData = await restartResponse.json();
+                
+                if (restartData.success) {
+                    alert('Config saved and wireproxy restarted successfully!');
+                    closeConfigModal();
+                    loadStatus();
+                } else {
+                    throw new Error(restartData.error);
+                }
+                
+            } catch (error) {
+                document.getElementById('config-alert').innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function viewLogs(service) {
+            try {
+                const response = await fetch(`/api/logs/${service}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('logs-content').textContent = data.logs;
+                    document.getElementById('logs-modal').classList.add('active');
+                } else {
+                    alert(`Error loading logs: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        function closeLogsModal() {
+            document.getElementById('logs-modal').classList.remove('active');
+        }
+        
+        async function testProxy(port) {
+            try {
+                const response = await fetch(`/api/test/proxy/${port}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ Proxy Test Successful!\n\nYour IP: ${data.ip}`);
+                } else {
+                    alert(`❌ Proxy Test Failed!\n\nError: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
+

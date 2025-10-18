@@ -1,0 +1,44 @@
+# WireGuard/Wiresock configs (chứa private keys)
+wireguard/*.conf
+wireguard/wireproxy*.conf
+*.conf
+
+# HAProxy configs (auto-generated)
+config/
+
+# Logs
+logs/
+*.log
+
+# PID files
+*.pid
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
