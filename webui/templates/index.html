@@ -375,7 +375,9 @@
                 const data = await response.json();
                 
                 // Update Wireproxy status
-                const wireproxyHtml = data.wireproxy.map(wp => `
+                const wireproxyHtml = data.wireproxy.map((wp, idx) => {
+                    const instance = idx + 1;
+                    return `
                     <div class="service-item">
                         <div class="service-header">
                             <span class="service-name">
@@ -388,11 +390,17 @@
                         ${wp.running ? `<div class="service-info">Connection: ${wp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
                         ${wp.pid ? `<div class="service-info">PID: ${wp.pid}</div>` : ''}
                         <div class="btn-group">
+                            ${!wp.running ? `<button class="btn btn-success" onclick="controlWireproxyInstance(${instance}, 'start')">Start</button>` : ''}
+                            ${wp.running ? `<button class="btn btn-danger" onclick="controlWireproxyInstance(${instance}, 'stop')">Stop</button>` : ''}
+                            <button class="btn btn-warning" onclick="controlWireproxyInstance(${instance}, 'restart')">Restart</button>
+                        </div>
+                        <div class="btn-group" style="margin-top: 10px;">
                             <button class="btn btn-info" onclick="testProxy('${wp.port}')">Test</button>
-                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${wp.port === '18181' ? '1' : '2'}')">Logs</button>
+                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${instance}')">Logs</button>
+                            <button class="btn btn-primary" onclick="openConfigModal(${instance})">Config</button>
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
                 document.getElementById('wireproxy-status').innerHTML = wireproxyHtml;
                 
                 // Update HAProxy status
@@ -430,6 +438,24 @@
                 
                 if (data.success) {
                     alert(`Wireproxy ${action} successful!`);
+                    loadStatus();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function controlWireproxyInstance(instance, action) {
+            if (!confirm(`Are you sure you want to ${action} Wireproxy ${instance}?`)) return;
+            
+            try {
+                const response = await fetch(`/api/wireproxy/${instance}/${action}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`${data.message || 'Wireproxy ' + instance + ' ' + action + ' successful!'}`);
                     loadStatus();
                 } else {
                     alert(`Error: ${data.error}`);

@@ -110,6 +110,20 @@ def save_wireproxy_config(config_path, config):
     except Exception as e:
         return False
 
+def trigger_health_check():
+    """Trigger HAProxy health monitors to check immediately by creating trigger file"""
+    try:
+        # Create trigger files for health monitors
+        for port in ['7891', '7892']:
+            trigger_file = os.path.join(LOG_DIR, f'trigger_check_{port}')
+            try:
+                with open(trigger_file, 'w') as f:
+                    f.write('1')
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 @app.route('/')
 def index():
     """Trang chủ"""
@@ -237,6 +251,125 @@ def api_wireproxy_action(action):
         'output': result['stdout'],
         'error': result['stderr']
     })
+
+@app.route('/api/wireproxy/<int:instance>/<action>', methods=['POST'])
+def api_wireproxy_instance_action(instance, action):
+    """Điều khiển từng wireproxy instance riêng lẻ"""
+    if instance not in [1, 2]:
+        return jsonify({'success': False, 'error': 'Invalid instance'}), 400
+    
+    if action not in ['start', 'stop', 'restart']:
+        return jsonify({'success': False, 'error': 'Invalid action'}), 400
+    
+    pid_file = os.path.join(LOG_DIR, f'wireproxy{instance}.pid')
+    config_file = WG1_CONF if instance == 1 else WG2_CONF
+    port = 18181 if instance == 1 else 18182
+    
+    if action == 'stop':
+        # Stop wireproxy instance
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, 15)  # SIGTERM
+                os.remove(pid_file)
+                return jsonify({
+                    'success': True,
+                    'message': f'Wireproxy {instance} stopped successfully'
+                })
+            except (OSError, ValueError) as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to stop: {str(e)}'
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Wireproxy not running'
+            }), 400
+    
+    elif action == 'start':
+        # Check if already running
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, 0)  # Check if process exists
+                return jsonify({
+                    'success': False,
+                    'error': 'Wireproxy already running'
+                }), 400
+            except OSError:
+                os.remove(pid_file)
+        
+        # Kill any process on the port
+        run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
+        
+        # Start wireproxy
+        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
+        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_file} > {log_file} 2>&1 & echo $!'
+        result = run_command(cmd)
+        
+        if result['success']:
+            pid = result['stdout'].strip()
+            with open(pid_file, 'w') as f:
+                f.write(pid)
+            
+            # Trigger health monitor to check immediately
+            trigger_health_check()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Wireproxy {instance} started successfully',
+                'pid': pid
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['stderr']
+            }), 500
+    
+    elif action == 'restart':
+        # Stop then start
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, 15)
+                os.remove(pid_file)
+            except (OSError, ValueError):
+                pass
+        
+        import time
+        time.sleep(1)
+        
+        # Kill any process on the port
+        run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
+        time.sleep(1)
+        
+        # Start wireproxy
+        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
+        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_file} > {log_file} 2>&1 & echo $!'
+        result = run_command(cmd)
+        
+        if result['success']:
+            pid = result['stdout'].strip()
+            with open(pid_file, 'w') as f:
+                f.write(pid)
+            
+            # Trigger health monitor to check immediately
+            trigger_health_check()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Wireproxy {instance} restarted successfully',
+                'pid': pid
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['stderr']
+            }), 500
 
 @app.route('/api/haproxy/<action>', methods=['POST'])
 def api_haproxy_action(action):

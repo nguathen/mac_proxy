@@ -11,6 +11,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🛑 Stopping HAProxy Multi-Instance System"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Dừng Web UI
+echo ""
+echo "🛑 Stopping Web UI..."
+if [ -f "stop_webui.sh" ]; then
+    chmod +x stop_webui.sh
+    ./stop_webui.sh
+fi
+
 # Dừng Wireproxy
 echo ""
 echo "🛑 Stopping wireproxy instances..."

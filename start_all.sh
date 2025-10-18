@@ -59,7 +59,7 @@ chmod +x setup_haproxy.sh
   --wg-ports 18181 \
   --host-proxy 127.0.0.1:8111 \
   --stats-auth admin:admin123 \
-  --health-interval 30 \
+  --health-interval 10 \
   --daemon
 
 sleep 2
@@ -75,10 +75,16 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
   --wg-ports 18182 \
   --host-proxy 127.0.0.1:8111 \
   --stats-auth admin:admin123 \
-  --health-interval 30 \
+  --health-interval 10 \
   --daemon
 
 sleep 2
+
+# Khởi động Web UI
+echo ""
+echo "🌐 Starting Web UI..."
+chmod +x start_webui_daemon.sh
+./start_webui_daemon.sh
 
 # Hiển thị trạng thái
 echo ""
@@ -98,6 +104,10 @@ echo ""
 echo "🔄 Cấu trúc fallback:"
 echo "   • HAProxy 1: Wiresock 18181 → Cloudflare WARP 8111"
 echo "   • HAProxy 2: Wiresock 18182 → Cloudflare WARP 8111"
+echo ""
+echo "🌐 Web UI:"
+echo "   • URL: http://127.0.0.1:5000"
+echo "   • Quản lý toàn bộ hệ thống qua giao diện web"
 echo ""
 echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"

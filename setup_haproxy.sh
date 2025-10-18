@@ -76,15 +76,11 @@ reload_haproxy() {
 
 check_backend() {
   local port=$1
-  local start=$(date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000)))
-  local ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} "$TEST_IP_URL" 2>/dev/null || echo "N/A")
-  local end=$(date +%s%3N 2>/dev/null || echo $(($(date +%s) * 1000)))
-  local latency=$((end - start))
-  
-  if [[ "$ip" == "N/A" || -z "$ip" ]]; then
-    echo "$port,offline,N/A"
+  # Use lightweight TCP check instead of HTTP request
+  if timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+    echo "$port,online,0s"
   else
-    echo "$port,online,$latency"
+    echo "$port,offline,N/A"
   fi
 }
 
@@ -95,9 +91,9 @@ build_haproxy_cfg() {
   
   for p in "${WG_PORTS[@]}"; do
     if [[ "$p" == "$active_port" ]]; then
-      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 5s rise 2 fall 3\n"
+      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter\n"
     else
-      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 5s rise 2 fall 3 backup\n"
+      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
     fi
     i=$((i+1))
   done
@@ -111,9 +107,12 @@ global
 
 defaults
     mode tcp
-    timeout connect 5s
+    timeout connect 2s
     timeout client 1m
     timeout server 1m
+    timeout check 2s
+    retries 2
+    option redispatch
     option tcplog
     log global
 
@@ -126,7 +125,7 @@ backend socks_back_${SOCK_PORT}
     option tcp-check
     tcp-check connect
 $(printf "%b" "$wg_servers")
-    server cloudflare_warp ${HOST_PROXY} check inter 5s rise 2 fall 3 backup
+    server cloudflare_warp ${HOST_PROXY} check inter 1s rise 1 fall 2 on-error fastinter backup
 
 listen stats_${SOCK_PORT}
     bind 0.0.0.0:${STATS_PORT}
@@ -141,41 +140,86 @@ EOF
   [[ -n "$STATS_AUTH" ]] && echo "    stats auth ${STATS_AUTH}" >> "$CFG_FILE"
 }
 
-health_loop() {
-  log "🩺 Health monitor started (interval ${HEALTH_INTERVAL}s, SOCKS $SOCK_PORT)"
-  
-  while true; do
-    declare -A latencies=()
-    best_port=""
-    best_latency=999999
+do_health_check() {
+  declare -A latencies=()
+  best_port=""
+  best_latency=999999
+  local config_changed=false
+  local current_best=""
 
-    for p in "${WG_PORTS[@]}"; do
-      result=$(check_backend "$p")
-      IFS=',' read -r port status latency <<< "$result"
-      
-      if [[ "$status" == "online" ]]; then
-        log "✅ Wiresock port $port OK (${latency}ms)"
-        latencies["$port"]=$latency
-        if (( latency < best_latency )); then
-          best_latency=$latency
-          best_port=$port
-        fi
-      else
-        log "❌ Wiresock port $port offline"
+  for p in "${WG_PORTS[@]}"; do
+    result=$(check_backend "$p")
+    IFS=',' read -r port status latency <<< "$result"
+    
+    if [[ "$status" == "online" ]]; then
+      # Extract numeric value for comparison
+      local lat_num=${latency%s}
+      latencies["$port"]=$lat_num
+      if (( lat_num < best_latency )); then
+        best_latency=$lat_num
+        best_port=$port
       fi
-    done
+    fi
+  done
 
+  # Determine current best backend
+  if [[ -n "$best_port" ]]; then
+    current_best="wiresock:$best_port"
+  else
+    current_best="warp"
+  fi
+
+  # Only reload if backend changed
+  local last_backend_file="${LOG_DIR}/last_backend_${SOCK_PORT}"
+  local last_backend=""
+  [[ -f "$last_backend_file" ]] && last_backend=$(cat "$last_backend_file")
+
+  if [[ "$current_best" != "$last_backend" ]]; then
+    config_changed=true
+    echo "$current_best" > "$last_backend_file"
+    
     if [[ -n "$best_port" ]]; then
-      log "🏆 Best backend: wiresock:$best_port (${best_latency}ms)"
+      log "🔄 Backend changed to: wiresock:$best_port (${best_latency}s)"
       build_haproxy_cfg "$best_port"
       reload_haproxy
     else
-      log "⚠️  No wiresock backend online — fallback to Cloudflare WARP ($HOST_PROXY)"
+      log "🔄 Backend changed to: Cloudflare WARP ($HOST_PROXY)"
       build_haproxy_cfg "none"
       reload_haproxy
     fi
+  fi
+}
+
+health_loop() {
+  log "🩺 Health monitor started (interval ${HEALTH_INTERVAL}s, SOCKS $SOCK_PORT)"
+  
+  local trigger_file="${LOG_DIR}/trigger_check_${SOCK_PORT}"
+  
+  while true; do
+    # Check if triggered by file
+    if [[ -f "$trigger_file" ]]; then
+      log "⚡ Triggered immediate health check"
+      rm -f "$trigger_file"
+      do_health_check
+    fi
     
-    sleep "$HEALTH_INTERVAL"
+    # Regular check
+    do_health_check
+    
+    # Sleep with inotify-like behavior (check every 2s instead of 1s)
+    local elapsed=0
+    while (( elapsed < HEALTH_INTERVAL )); do
+      sleep 2
+      elapsed=$((elapsed + 2))
+      
+      # Check trigger during sleep
+      if [[ -f "$trigger_file" ]]; then
+        log "⚡ Triggered immediate health check"
+        rm -f "$trigger_file"
+        do_health_check
+        break
+      fi
+    done
   done
 }
 
