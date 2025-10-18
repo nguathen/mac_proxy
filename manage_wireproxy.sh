@@ -15,8 +15,59 @@ mkdir -p "$LOG_DIR"
 timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
 
+check_and_kill_port() {
+    local port=$1
+    local service_name=$2
+    
+    log "🔍 Checking port $port..."
+    
+    # Tìm process đang sử dụng port (macOS/Linux compatible)
+    local pids=""
+    
+    # Try lsof first (macOS/Linux)
+    if command -v lsof &> /dev/null; then
+        pids=$(lsof -ti :$port 2>/dev/null || echo "")
+    fi
+    
+    # Try netstat if lsof not available (Linux)
+    if [ -z "$pids" ] && command -v netstat &> /dev/null; then
+        pids=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 || echo "")
+    fi
+    
+    # Try ss if available (Linux)
+    if [ -z "$pids" ] && command -v ss &> /dev/null; then
+        pids=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' || echo "")
+    fi
+    
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+                # Get process name
+                local proc_name=$(ps -p $pid -o comm= 2>/dev/null || echo "unknown")
+                log "⚠️  Found process on port $port: $proc_name (PID: $pid)"
+                
+                # Kill the process
+                if kill -9 $pid 2>/dev/null; then
+                    log "✅ Killed process $pid on port $port"
+                else
+                    log "❌ Failed to kill process $pid (may need sudo)"
+                fi
+            fi
+        done
+        sleep 1
+    else
+        log "✅ Port $port is free"
+    fi
+}
+
 start_wireproxy() {
     log "🚀 Starting wireproxy instances..."
+    
+    # Check and kill any process using port 18181
+    check_and_kill_port 18181 "Wireproxy 1"
+    
+    # Check and kill any process using port 18182
+    check_and_kill_port 18182 "Wireproxy 2"
     
     # Start wireproxy 1 (port 18181)
     if [ -f "$WG1_CONF" ]; then
@@ -75,8 +126,19 @@ stop_wireproxy() {
         fi
     fi
     
-    # Cleanup any remaining wireproxy processes
-    pkill -f "wireproxy.*wg1818" 2>/dev/null || true
+    # Cleanup any remaining wireproxy processes on our ports
+    log "🧹 Cleaning up any remaining processes on ports 18181 and 18182..."
+    
+    # Kill any process on port 18181
+    if command -v lsof &> /dev/null; then
+        lsof -ti :18181 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+        lsof -ti :18182 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+    fi
+    
+    # Also try to kill by process name pattern
+    pkill -9 -f "wireproxy.*wg1818" 2>/dev/null || true
+    
+    log "✅ Cleanup complete"
 }
 
 restart_wireproxy() {

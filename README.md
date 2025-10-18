@@ -76,49 +76,56 @@ warp-cli set-mode proxy
 warp-cli set-proxy-port 8111
 ```
 
-### 3. Khởi động Wiresock (WireGuard SOCKS5 Client)
+### 3. Khởi động Wireproxy (WireGuard SOCKS5 Client)
 
-**Wiresock** là WireGuard client hỗ trợ SOCKS5 proxy. Bạn cần khởi động 2 instance:
+**Wireproxy** là WireGuard client hỗ trợ SOCKS5 proxy.
+
+**Lưu ý quan trọng:** Nếu bạn đang chạy wireproxy ở dự án khác trên cùng port, hệ thống sẽ tự động kill và restart.
 
 ```bash
-# Instance 1 - Port 18181
-wiresock-client run -config wg1.conf -socks-bind 127.0.0.1:18181 &
+# Kiểm tra port đang được sử dụng
+./check_ports.sh
 
-# Instance 2 - Port 18182
-wiresock-client run -config wg2.conf -socks-bind 127.0.0.1:18182 &
+# Kill tất cả process trên port 18181 và 18182
+./kill_ports.sh
 ```
 
-**Lưu ý:** Nếu bạn dùng `wireproxy` thay vì `wiresock-client`:
+**Cấu hình wireproxy:**
 
 ```bash
-# Tạo file wireproxy1.conf
-cat > wireguard/wireproxy1.conf <<EOF
+# File wg18181.conf và wg18182.conf đã có sẵn
+# Chỉnh sửa Endpoint trong file config để thay đổi server
+
+# Ví dụ nội dung file:
 [Interface]
 PrivateKey = YOUR_PRIVATE_KEY
-Address = 10.0.0.2/32
+Address = 10.5.0.2/16
+DNS = 8.8.8.8
 
 [Peer]
 PublicKey = SERVER_PUBLIC_KEY
-Endpoint = SERVER_IP:51820
+Endpoint = 81.17.123.100:51820  # <-- Thay đổi IP:Port ở đây
 AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
 
 [Socks5]
-BindAddress = 127.0.0.1:18181
-EOF
-
-# Chạy wireproxy
-wireproxy -c wireguard/wireproxy1.conf &
-wireproxy -c wireguard/wireproxy2.conf &
+BindAddress = 0.0.0.0:18181  # <-- Port cho wireproxy 1
 ```
 
-### 4. Khởi động hệ thống HAProxy
+### 4. Khởi động hệ thống
 
 ```bash
 # Cấp quyền thực thi
 chmod +x *.sh
 
-# Khởi động tất cả
+# Khởi động tất cả (tự động kill port cũ và start wireproxy + HAProxy)
 ./start_all.sh
+
+# Hoặc chỉ quản lý wireproxy
+./manage_wireproxy.sh start   # Tự động kill port cũ trước khi start
+./manage_wireproxy.sh stop
+./manage_wireproxy.sh restart
+./manage_wireproxy.sh status
 ```
 
 ## 📊 Sử dụng

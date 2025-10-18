@@ -72,7 +72,7 @@ Click `Edit Wireproxy 1/2 Config` để:
 
 2. **Thay đổi Peer:**
    - Public Key
-   - **Endpoint** (IP:Port của WireGuard server)
+   - **Endpoint** (IP:Port của WireGuard server) ⭐ **Quan trọng nhất**
    - Allowed IPs
    - Persistent Keepalive
 
@@ -82,7 +82,10 @@ Click `Edit Wireproxy 1/2 Config` để:
 4. Click `Save & Restart` để:
    - Lưu config mới
    - Backup config cũ
+   - **Tự động kill process cũ trên port** (nếu có)
    - Tự động restart wireproxy
+
+**Lưu ý:** Nếu bạn đang chạy wireproxy ở dự án khác trên cùng port 18181/18182, hệ thống sẽ tự động kill process cũ trước khi start.
 
 ### 4. View Logs
 
@@ -202,6 +205,36 @@ pip3 install Flask
 lsof -i :5000
 ```
 
+### Port 18181/18182 đã được sử dụng
+
+```bash
+# Kiểm tra process đang dùng port
+./check_ports.sh
+
+# Kill tất cả process trên port
+./kill_ports.sh
+
+# Hoặc kill thủ công
+lsof -ti :18181 | xargs kill -9
+lsof -ti :18182 | xargs kill -9
+```
+
+### Wireproxy từ dự án khác đang chạy
+
+```bash
+# Xem tất cả wireproxy processes
+ps aux | grep wireproxy
+
+# Kill tất cả wireproxy
+pkill -9 wireproxy
+
+# Hoặc kill specific PID
+kill -9 <PID>
+
+# Sau đó start lại
+./manage_wireproxy.sh start
+```
+
 ### Không thể control services
 
 ```bash
@@ -209,6 +242,8 @@ lsof -i :5000
 chmod +x manage_wireproxy.sh
 chmod +x start_all.sh
 chmod +x stop_all.sh
+chmod +x check_ports.sh
+chmod +x kill_ports.sh
 
 # Kiểm tra scripts có chạy được không
 ./manage_wireproxy.sh status

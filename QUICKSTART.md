@@ -16,58 +16,28 @@ warp-cli set-proxy-port 8111
 warp-cli connect
 ```
 
-## Bước 3: Khởi động Wiresock
+## Bước 3: Chuẩn bị Wireproxy Config
 
-Bạn cần có 2 WireGuard config files và chạy wiresock-client:
+**Lưu ý:** Nếu bạn đang chạy wireproxy ở dự án khác trên port 18181/18182, hệ thống sẽ tự động kill và restart.
 
 ```bash
-# Wiresock 1 - Port 18181
-wiresock-client run -config wg1.conf -socks-bind 127.0.0.1:18181 &
+# Kiểm tra port có đang được dùng không
+./check_ports.sh
 
-# Wiresock 2 - Port 18182
-wiresock-client run -config wg2.conf -socks-bind 127.0.0.1:18182 &
+# Kill nếu cần
+./kill_ports.sh
 ```
 
-**Hoặc nếu dùng wireproxy:**
+Bạn đã có 2 config files: `wg18181.conf` và `wg18182.conf`. Chỉnh sửa Endpoint nếu cần:
 
 ```bash
-brew install wireproxy
+# Edit wg18181.conf
+nano wg18181.conf
+# Thay đổi dòng: Endpoint = 81.17.123.100:51820
 
-# Tạo file wireproxy1.conf
-cat > wireguard/wireproxy1.conf <<'EOF'
-[Interface]
-PrivateKey = YOUR_PRIVATE_KEY_1
-Address = 10.0.0.2/32
-
-[Peer]
-PublicKey = SERVER_PUBLIC_KEY_1
-Endpoint = SERVER_IP_1:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-
-[Socks5]
-BindAddress = 127.0.0.1:18181
-EOF
-
-# Tạo file wireproxy2.conf
-cat > wireguard/wireproxy2.conf <<'EOF'
-[Interface]
-PrivateKey = YOUR_PRIVATE_KEY_2
-Address = 10.0.0.3/32
-
-[Peer]
-PublicKey = SERVER_PUBLIC_KEY_2
-Endpoint = SERVER_IP_2:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
-
-[Socks5]
-BindAddress = 127.0.0.1:18182
-EOF
-
-# Chạy wireproxy
-wireproxy -c wireguard/wireproxy1.conf &
-wireproxy -c wireguard/wireproxy2.conf &
+# Edit wg18182.conf  
+nano wg18182.conf
+# Thay đổi dòng: Endpoint = 193.9.33.3:51820
 ```
 
 ## Bước 4: Khởi động HAProxy
