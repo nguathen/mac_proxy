@@ -328,12 +328,65 @@
             </div>
         </div>
         
-        <!-- Config Management -->
+        <!-- NordVPN Management -->
         <div class="card">
-            <h2>⚙️ Configuration Management</h2>
+            <h2>🌍 NordVPN Server Selection</h2>
+            <p style="color: #666; margin-bottom: 15px;">Chọn server NordVPN và áp dụng vào wireproxy instance</p>
+            
+            <div class="config-field">
+                <label>Select Country:</label>
+                <select id="nordvpn-country" class="config-field input" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                    <option value="">Loading countries...</option>
+                </select>
+            </div>
+            
+            <div class="config-field">
+                <label>Select Server:</label>
+                <select id="nordvpn-server" class="config-field input" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                    <option value="">Select a country first</option>
+                </select>
+            </div>
+            
+            <div id="nordvpn-server-info" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; display: none;">
+                <div style="font-weight: 600; margin-bottom: 10px;">Server Information:</div>
+                <div id="nordvpn-info-content"></div>
+            </div>
+            
             <div class="btn-group">
-                <button class="btn btn-primary" onclick="openConfigModal(1)">Edit Wireproxy 1 Config</button>
-                <button class="btn btn-primary" onclick="openConfigModal(2)">Edit Wireproxy 2 Config</button>
+                <button class="btn btn-success" onclick="applyNordVPNServer(1)">Apply to Wireproxy 1</button>
+                <button class="btn btn-success" onclick="applyNordVPNServer(2)">Apply to Wireproxy 2</button>
+                <button class="btn btn-info" onclick="loadNordVPNServers(true)">Refresh Servers</button>
+            </div>
+        </div>
+        
+        <!-- ProtonVPN Management -->
+        <div class="card">
+            <h2>🔐 ProtonVPN Server Selection</h2>
+            <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào wireproxy instance</p>
+            
+            <div class="config-field">
+                <label>Select Country:</label>
+                <select id="protonvpn-country" class="config-field input" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                    <option value="">Loading countries...</option>
+                </select>
+            </div>
+            
+            <div class="config-field">
+                <label>Select Server:</label>
+                <select id="protonvpn-server" class="config-field input" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px;">
+                    <option value="">Select a country first</option>
+                </select>
+            </div>
+            
+            <div id="protonvpn-server-info" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0; display: none;">
+                <div style="font-weight: 600; margin-bottom: 10px;">Server Information:</div>
+                <div id="protonvpn-info-content"></div>
+            </div>
+            
+            <div class="btn-group">
+                <button class="btn btn-success" onclick="applyProtonVPNServer(1)">Apply to Wireproxy 1</button>
+                <button class="btn btn-success" onclick="applyProtonVPNServer(2)">Apply to Wireproxy 2</button>
+                <button class="btn btn-info" onclick="loadProtonVPNCountries()">🔄 Refresh</button>
             </div>
         </div>
     </div>
@@ -362,11 +415,27 @@
 
     <script>
         let currentInstance = null;
+        let nordvpnServers = [];
+        let nordvpnCountries = [];
         
         // Load status on page load
         document.addEventListener('DOMContentLoaded', () => {
             loadStatus();
             setInterval(loadStatus, 5000); // Refresh every 5 seconds
+            
+            // Load NordVPN data
+            loadNordVPNCountries();
+            
+            // Setup NordVPN event listeners
+            document.getElementById('nordvpn-country').addEventListener('change', onCountryChange);
+            document.getElementById('nordvpn-server').addEventListener('change', onServerChange);
+            
+            // Load ProtonVPN countries
+            loadProtonVPNCountries();
+            
+            // Setup ProtonVPN event listeners
+            document.getElementById('protonvpn-country').addEventListener('change', onProtonVPNCountryChange);
+            document.getElementById('protonvpn-server').addEventListener('change', onProtonVPNServerChange);
         });
         
         async function loadStatus() {
@@ -639,6 +708,287 @@
                 alert(`❌ Error: ${error.message}`);
             }
         }
+        
+        // NordVPN Functions
+        async function loadNordVPNCountries() {
+            try {
+                const response = await fetch('/api/nordvpn/countries');
+                const data = await response.json();
+                
+                if (data.success) {
+                    nordvpnCountries = data.countries;
+                    const select = document.getElementById('nordvpn-country');
+                    
+                    select.innerHTML = '<option value="">-- Select Country --</option>';
+                    data.countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country.code;
+                        option.textContent = `${country.name} (${country.server_count} servers)`;
+                        select.appendChild(option);
+                    });
+                } else {
+                    console.error('Failed to load countries:', data.error);
+                    document.getElementById('nordvpn-country').innerHTML = '<option value="">Error loading countries</option>';
+                }
+            } catch (error) {
+                console.error('Error loading countries:', error);
+                document.getElementById('nordvpn-country').innerHTML = '<option value="">Error loading countries</option>';
+            }
+        }
+        
+        async function loadNordVPNServers(forceRefresh = false) {
+            try {
+                const url = forceRefresh ? '/api/nordvpn/servers?refresh=true' : '/api/nordvpn/servers';
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.success) {
+                    nordvpnServers = data.servers;
+                    alert(`✅ Loaded ${data.count} NordVPN servers`);
+                    
+                    // Reload countries
+                    await loadNordVPNCountries();
+                    
+                    // If a country is selected, reload its servers
+                    const selectedCountry = document.getElementById('nordvpn-country').value;
+                    if (selectedCountry) {
+                        onCountryChange();
+                    }
+                } else {
+                    alert(`❌ Failed to load servers: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function onCountryChange() {
+            const countryCode = document.getElementById('nordvpn-country').value;
+            const serverSelect = document.getElementById('nordvpn-server');
+            
+            if (!countryCode) {
+                serverSelect.innerHTML = '<option value="">Select a country first</option>';
+                document.getElementById('nordvpn-server-info').style.display = 'none';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/nordvpn/servers/${countryCode}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    serverSelect.innerHTML = '<option value="">-- Select Server --</option>';
+                    
+                    // Sort by load
+                    const servers = data.servers.sort((a, b) => a.load - b.load);
+                    
+                    servers.forEach(server => {
+                        const option = document.createElement('option');
+                        option.value = server.name;
+                        option.textContent = `${server.name} - Load: ${server.load}% - ${server.country.city || 'N/A'}`;
+                        option.dataset.serverData = JSON.stringify(server);
+                        serverSelect.appendChild(option);
+                    });
+                } else {
+                    serverSelect.innerHTML = '<option value="">Error loading servers</option>';
+                }
+            } catch (error) {
+                console.error('Error loading servers:', error);
+                serverSelect.innerHTML = '<option value="">Error loading servers</option>';
+            }
+        }
+        
+        function onServerChange() {
+            const serverSelect = document.getElementById('nordvpn-server');
+            const selectedOption = serverSelect.options[serverSelect.selectedIndex];
+            
+            if (!selectedOption || !selectedOption.dataset.serverData) {
+                document.getElementById('nordvpn-server-info').style.display = 'none';
+                return;
+            }
+            
+            const server = JSON.parse(selectedOption.dataset.serverData);
+            
+            const infoHtml = `
+                <div style="font-size: 0.9em; color: #333;">
+                    <div style="margin-bottom: 5px;"><strong>Name:</strong> ${server.name}</div>
+                    <div style="margin-bottom: 5px;"><strong>Hostname:</strong> ${server.hostname}</div>
+                    <div style="margin-bottom: 5px;"><strong>Country:</strong> ${server.country.name} (${server.country.code})</div>
+                    ${server.country.city ? `<div style="margin-bottom: 5px;"><strong>City:</strong> ${server.country.city}</div>` : ''}
+                    <div style="margin-bottom: 5px;"><strong>IP:</strong> ${server.station}</div>
+                    <div style="margin-bottom: 5px;"><strong>Load:</strong> ${server.load}%</div>
+                    <div style="margin-bottom: 5px;"><strong>Status:</strong> ${server.status === 'online' ? '✅ Online' : '❌ Offline'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Public Key:</strong> ${server.public_key.substring(0, 30)}...</div>
+                </div>
+            `;
+            
+            document.getElementById('nordvpn-info-content').innerHTML = infoHtml;
+            document.getElementById('nordvpn-server-info').style.display = 'block';
+        }
+        
+        async function applyNordVPNServer(instance) {
+            const serverSelect = document.getElementById('nordvpn-server');
+            const serverName = serverSelect.value;
+            
+            if (!serverName) {
+                alert('Please select a server first');
+                return;
+            }
+            
+            if (!confirm(`Apply NordVPN server "${serverName}" to Wireproxy ${instance}?\n\nThis will restart the wireproxy instance.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/nordvpn/apply/${instance}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_name: serverName })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ ${data.message}\n\nServer: ${data.server.name}\nCountry: ${data.server.country.name}\nIP: ${data.server.station}`);
+                    loadStatus();
+                } else {
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        // ProtonVPN Functions
+        
+        async function loadProtonVPNCountries() {
+            try {
+                const response = await fetch('/api/protonvpn/countries');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const select = document.getElementById('protonvpn-country');
+                    select.innerHTML = '<option value="">-- Select Country --</option>';
+                    
+                    data.countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country.code;
+                        option.textContent = `${country.name} (${country.server_count} servers)`;
+                        select.appendChild(option);
+                    });
+                } else {
+                    console.error('Failed to load countries:', data.error);
+                    alert(`❌ Failed to load ProtonVPN countries: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error loading countries:', error);
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function onProtonVPNCountryChange() {
+            const countryCode = document.getElementById('protonvpn-country').value;
+            const serverSelect = document.getElementById('protonvpn-server');
+            
+            if (!countryCode) {
+                serverSelect.innerHTML = '<option value="">Select a country first</option>';
+                document.getElementById('protonvpn-server-info').style.display = 'none';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/protonvpn/servers/${countryCode}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    serverSelect.innerHTML = '<option value="">-- Select Server --</option>';
+                    
+                    data.servers.forEach(server => {
+                        const option = document.createElement('option');
+                        option.value = server.name;
+                        
+                        const tierBadge = server.tier === 0 ? '🆓' : server.tier === 1 ? '⭐' : server.tier === 2 ? '⭐⭐' : '⭐⭐⭐';
+                        const loadPercent = server.load || 0;
+                        const loadEmoji = loadPercent < 50 ? '🟢' : loadPercent < 75 ? '🟡' : '🔴';
+                        
+                        option.textContent = `${tierBadge} ${server.name} - ${server.city || 'N/A'} ${loadEmoji} ${loadPercent}%`;
+                        option.dataset.serverData = JSON.stringify(server);
+                        serverSelect.appendChild(option);
+                    });
+                } else {
+                    serverSelect.innerHTML = '<option value="">Error loading servers</option>';
+                }
+            } catch (error) {
+                console.error('Error loading servers:', error);
+                serverSelect.innerHTML = '<option value="">Error loading servers</option>';
+            }
+        }
+        
+        function onProtonVPNServerChange() {
+            const serverSelect = document.getElementById('protonvpn-server');
+            const selectedOption = serverSelect.options[serverSelect.selectedIndex];
+            
+            if (!selectedOption || !selectedOption.dataset.serverData) {
+                document.getElementById('protonvpn-server-info').style.display = 'none';
+                return;
+            }
+            
+            const server = JSON.parse(selectedOption.dataset.serverData);
+            
+            const tierText = server.tier === 0 ? 'Free' : server.tier === 1 ? 'Basic' : server.tier === 2 ? 'Plus' : 'Visionary';
+            const loadPercent = server.load || 0;
+            const loadColor = loadPercent < 50 ? '#28a745' : loadPercent < 75 ? '#ffc107' : '#dc3545';
+            
+            const infoHtml = `
+                <div style="font-size: 0.9em; color: #333;">
+                    <div style="margin-bottom: 5px;"><strong>Name:</strong> ${server.name}</div>
+                    <div style="margin-bottom: 5px;"><strong>Country:</strong> ${server.country_name} (${server.country_code})</div>
+                    <div style="margin-bottom: 5px;"><strong>City:</strong> ${server.city || 'N/A'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Tier:</strong> ${tierText}</div>
+                    <div style="margin-bottom: 5px;"><strong>Load:</strong> <span style="color: ${loadColor}; font-weight: bold;">${loadPercent}%</span></div>
+                    <div style="margin-bottom: 5px;"><strong>Status:</strong> ${server.status === 1 ? '✅ Online' : '❌ Offline'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Score:</strong> ${server.score ? server.score.toFixed(2) : 'N/A'}</div>
+                </div>
+            `;
+            
+            document.getElementById('protonvpn-info-content').innerHTML = infoHtml;
+            document.getElementById('protonvpn-server-info').style.display = 'block';
+        }
+        
+        async function applyProtonVPNServer(instance) {
+            const serverSelect = document.getElementById('protonvpn-server');
+            const serverName = serverSelect.value;
+            
+            if (!serverName) {
+                alert('Please select a server first');
+                return;
+            }
+            
+            if (!confirm(`Apply ProtonVPN server "${serverName}" to Wireproxy ${instance}?\n\nThis will restart the wireproxy instance.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/protonvpn/apply/${instance}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_name: serverName })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const server = data.server;
+                    alert(`✅ ${data.message}\n\nServer: ${server.name}\nCountry: ${server.country_name}\nCity: ${server.city || 'N/A'}\nLoad: ${server.load || 0}%`);
+                    loadStatus();
+                } else {
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
     </script>
 </body>
 </html>

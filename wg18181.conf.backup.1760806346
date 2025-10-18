@@ -1,0 +1,13 @@
+[Interface]
+PrivateKey = ECDeW1Oi8TC5reUZcyp8n3KAOaDVz3ZXZB5tu1+8Ik4=
+Address = 10.5.0.2/16
+DNS = 103.86.96.100
+
+[Peer]
+PublicKey = 24IO9X6HN0Rx/KLpFpcZHjcI2bJ6Z6JWJ+ZShKjTZkU=
+Endpoint = 37.120.149.29:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+
+[Socks5]
+BindAddress = 127.0.0.1:18181

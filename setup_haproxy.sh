@@ -76,11 +76,23 @@ reload_haproxy() {
 
 check_backend() {
   local port=$1
-  # Use lightweight TCP check instead of HTTP request
-  if timeout 2 bash -c "echo > /dev/tcp/127.0.0.1/$port" 2>/dev/null; then
-    echo "$port,online,0s"
-  else
+  
+  # Step 1: Check if port is listening
+  if ! bash -c "exec 3<>/dev/tcp/127.0.0.1/$port && exec 3>&-" 2>/dev/null; then
     echo "$port,offline,N/A"
+    return
+  fi
+  
+  # Step 2: Test actual SOCKS proxy functionality
+  # Try to connect through the proxy to a reliable endpoint
+  local start_time=$(date +%s)
+  if curl -s --connect-timeout 2 --max-time 3 -x "socks5h://127.0.0.1:$port" https://1.1.1.1 >/dev/null 2>&1; then
+    local end_time=$(date +%s)
+    local latency=$((end_time - start_time))
+    echo "$port,online,${latency}s"
+  else
+    # Port is open but proxy is not working (e.g., WireGuard tunnel down)
+    echo "$port,degraded,N/A"
   fi
 }
 
@@ -90,7 +102,10 @@ build_haproxy_cfg() {
   local i=1
   
   for p in "${WG_PORTS[@]}"; do
-    if [[ "$p" == "$active_port" ]]; then
+    if [[ "$active_port" == "none" ]]; then
+      # All WG servers as backup when forcing WARP
+      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup disabled\n"
+    elif [[ "$p" == "$active_port" ]]; then
       wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter\n"
     else
       wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
@@ -159,6 +174,9 @@ do_health_check() {
         best_latency=$lat_num
         best_port=$port
       fi
+    elif [[ "$status" == "degraded" ]]; then
+      # Port is listening but proxy not working - treat as offline
+      log "⚠️  Backend $port is degraded (port open but proxy not working)"
     fi
   done
 

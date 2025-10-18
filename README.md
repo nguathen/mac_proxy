@@ -42,6 +42,7 @@ Hệ thống proxy với HAProxy, Wiresock (WireGuard SOCKS5 client) và Cloudfl
 - ✅ **External access**: Bind 0.0.0.0 cho phép truy cập từ mạng ngoài
 - ✅ **Latency-based routing**: Tự động chọn backend có latency thấp nhất
 - ✅ **Graceful degradation**: Fallback cascade từ WG → WARP
+- ✅ **NordVPN Integration**: Tích hợp NordVPN với 5000+ servers, chọn server theo quốc gia
 
 ## 📋 Yêu cầu
 
@@ -145,6 +146,7 @@ chmod +x *.sh
 - ✅ Edit Wireproxy config (thay đổi server IP)
 - ✅ View logs real-time
 - ✅ Test proxy connections
+- ✅ **NordVPN Server Selection** - Chọn server NordVPN theo quốc gia và áp dụng ngay
 
 👉 Xem chi tiết: [WEBUI_README.md](WEBUI_README.md)
 
@@ -353,6 +355,50 @@ mac_proxy/
 │   └── wireproxy2.conf
 └── README.md             # Tài liệu này
 ```
+
+## 🌍 NordVPN Integration
+
+Hệ thống đã tích hợp NordVPN với 5000+ servers trên 46 quốc gia.
+
+### Quick Start
+
+```bash
+# List countries
+bash apply_nordvpn.sh --list-countries
+
+# List servers in Japan
+bash apply_nordvpn.sh --list-servers JP
+
+# Apply best server in Japan to Wireproxy 1
+bash apply_nordvpn.sh --instance 1 --country JP
+
+# Apply specific server to Wireproxy 2
+bash apply_nordvpn.sh --instance 2 --server "Singapore #528"
+```
+
+### Sử dụng qua Web UI
+
+1. Mở http://localhost:5000
+2. Scroll xuống phần "🌍 NordVPN Server Selection"
+3. Chọn quốc gia → Chọn server → Click "Apply to Wireproxy"
+
+### CLI Commands
+
+```bash
+# List countries
+python3 nordvpn_cli.py countries
+
+# List servers by country
+python3 nordvpn_cli.py servers --country JP --limit 20
+
+# Get best server
+python3 nordvpn_cli.py best --country SG
+
+# Apply server
+python3 nordvpn_cli.py apply 1 --server "Japan #720"
+```
+
+👉 Xem chi tiết: [NORDVPN.md](NORDVPN.md) | [NORDVPN_QUICKSTART.md](NORDVPN_QUICKSTART.md)
 
 ## 🛡️ Bảo mật
 
