@@ -336,6 +336,9 @@
                     <button class="btn btn-danger" onclick="controlHAProxy('stop')">Stop All</button>
                     <button class="btn btn-warning" onclick="controlHAProxy('restart')">Restart All</button>
                 </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                    <button class="btn btn-primary" onclick="openAddHAProxyModal()">➕ Add New HAProxy</button>
+                </div>
             </div>
         </div>
         
@@ -363,9 +366,10 @@
                 <div id="nordvpn-info-content"></div>
             </div>
             
-            <div class="btn-group">
-                <button class="btn btn-success" onclick="applyNordVPNServer(1)">Apply to Wireproxy 1</button>
-                <button class="btn btn-success" onclick="applyNordVPNServer(2)">Apply to Wireproxy 2</button>
+            <div id="nordvpn-apply-buttons" class="btn-group">
+                <!-- Buttons will be generated dynamically -->
+            </div>
+            <div class="btn-group" style="margin-top: 10px;">
                 <button class="btn btn-info" onclick="loadNordVPNServers(true)">Refresh Servers</button>
             </div>
         </div>
@@ -398,13 +402,11 @@
                 <div id="protonvpn-info-content"></div>
             </div>
             
-            <div class="btn-group">
-                <button class="btn btn-success" onclick="applyProtonVPNServer(1, 'wireproxy')">Apply to Wireproxy 1</button>
-                <button class="btn btn-success" onclick="applyProtonVPNServer(2, 'wireproxy')">Apply to Wireproxy 2</button>
+            <div id="protonvpn-wireproxy-buttons" class="btn-group">
+                <!-- Wireproxy buttons will be generated dynamically -->
             </div>
-            <div class="btn-group" style="margin-top: 10px;">
-                <button class="btn btn-primary" onclick="applyProtonVPNServer(1, 'https')">Apply to HTTPS Proxy 1 (8181)</button>
-                <button class="btn btn-primary" onclick="applyProtonVPNServer(2, 'https')">Apply to HTTPS Proxy 2 (8182)</button>
+            <div id="protonvpn-https-buttons" class="btn-group" style="margin-top: 10px;">
+                <!-- HTTPS Proxy buttons will be generated dynamically -->
             </div>
             <div class="btn-group" style="margin-top: 10px;">
                 <button class="btn btn-info" onclick="loadProtonVPNCountries()">🔄 Refresh</button>
@@ -433,6 +435,32 @@
             <div class="logs-container" id="logs-content"></div>
         </div>
     </div>
+    
+    <!-- Add HAProxy Modal -->
+    <div id="add-haproxy-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>➕ Add New HAProxy Service</h2>
+                <button class="modal-close" onclick="closeAddHAProxyModal()">&times;</button>
+            </div>
+            <div id="add-haproxy-alert"></div>
+            <div class="config-field">
+                <label>SOCKS Port:</label>
+                <input type="number" id="haproxy-sock-port" placeholder="e.g., 7893" min="1024" max="65535" oninput="autoCalculateStatsPort()" />
+                <small style="color: #666; display: block; margin-top: 5px;">Stats Port will be auto-calculated as SOCKS Port + 200</small>
+            </div>
+            <input type="hidden" id="haproxy-stats-port" />
+            <div class="config-field">
+                <label>WireGuard Backend Ports (comma separated):</label>
+                <input type="text" id="haproxy-wg-ports" placeholder="e.g., 18181,18182" />
+                <small style="color: #666; display: block; margin-top: 5px;">Leave empty to use default: 18181</small>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-success" onclick="createHAProxyService()">Create & Start</button>
+                <button class="btn btn-danger" onclick="closeAddHAProxyModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         let currentInstance = null;
@@ -459,10 +487,20 @@
             document.getElementById('protonvpn-server').addEventListener('change', onProtonVPNServerChange);
         });
         
+        let currentWireproxyInstances = [];
+        let currentHttpsProxyInstances = [];
+        
         async function loadStatus() {
             try {
                 const response = await fetch('/api/status');
                 const data = await response.json();
+                
+                // Store current instances for VPN server selection
+                currentWireproxyInstances = data.wireproxy;
+                currentHttpsProxyInstances = data.https_proxy;
+                
+                // Update VPN server selection buttons
+                updateVPNButtons();
                 
                 // Update Wireproxy status
                 const wireproxyHtml = data.wireproxy.map((wp, idx) => {
@@ -488,6 +526,7 @@
                             <button class="btn btn-info" onclick="testProxy('${wp.port}')">Test</button>
                             <button class="btn btn-primary" onclick="viewLogs('wireproxy${instance}')">Logs</button>
                             <button class="btn btn-primary" onclick="openConfigModal(${instance})">Config</button>
+                            ${!wp.running ? `<button class="btn btn-danger" onclick="deleteWireproxy(${instance}, '${wp.port}')">Delete</button>` : ''}
                         </div>
                     </div>
                 `}).join('');
@@ -530,6 +569,7 @@
                         <div class="btn-group">
                             <button class="btn btn-info" onclick="testProxy('${hp.port}')">Test</button>
                             <button class="btn btn-primary" onclick="viewLogs('haproxy${hp.port === '7891' ? '1' : '2'}')">Logs</button>
+                            <button class="btn btn-danger" onclick="deleteHAProxyService('${hp.port}')">Delete</button>
                         </div>
                     </div>
                 `).join('');
@@ -780,6 +820,30 @@
             } catch (error) {
                 alert(`Error: ${error.message}`);
             }
+        }
+        
+        // Update VPN server selection buttons dynamically
+        function updateVPNButtons() {
+            // Update NordVPN buttons
+            const nordvpnButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
+                const instance = idx + 1;
+                return `<button class="btn btn-success" onclick="applyNordVPNServer(${instance})">Apply to Wireproxy ${instance} (${wp.port})</button>`;
+            }).join('');
+            document.getElementById('nordvpn-apply-buttons').innerHTML = nordvpnButtonsHtml;
+            
+            // Update ProtonVPN Wireproxy buttons
+            const protonWireproxyButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
+                const instance = idx + 1;
+                return `<button class="btn btn-success" onclick="applyProtonVPNServer(${instance}, 'wireproxy')">Apply to Wireproxy ${instance} (${wp.port})</button>`;
+            }).join('');
+            document.getElementById('protonvpn-wireproxy-buttons').innerHTML = protonWireproxyButtonsHtml;
+            
+            // Update ProtonVPN HTTPS Proxy buttons
+            const protonHttpsButtonsHtml = currentHttpsProxyInstances.map((hp, idx) => {
+                const instance = idx + 1;
+                return `<button class="btn btn-primary" onclick="applyProtonVPNServer(${instance}, 'https')">Apply to HTTPS Proxy ${instance} (${hp.port})</button>`;
+            }).join('');
+            document.getElementById('protonvpn-https-buttons').innerHTML = protonHttpsButtonsHtml;
         }
         
         // NordVPN Functions
@@ -1048,7 +1112,8 @@
                 confirmMsg = `Apply ProtonVPN server "${serverName}" to HTTPS Proxy ${instance} (port ${httpsPort})?\n\nThis will use domain-based connection.`;
                 apiUrl = `/api/protonvpn/apply/https/${instance}`;
             } else {
-                const wireproxyPort = instance === 1 ? 18181 : 18182;
+                // Get port from current wireproxy instances
+                const wireproxyPort = currentWireproxyInstances[instance - 1]?.port || '?';
                 confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy ${instance} (port ${wireproxyPort})?\n\nThis will create WireGuard tunnel.`;
                 apiUrl = `/api/protonvpn/apply/${instance}`;
             }
@@ -1085,8 +1150,8 @@
                         message += `Test with:\n`;
                         message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://api.ipify.org`;
                     } else {
-                        // Wireproxy - show SOCKS5 info
-                        const wireproxyPort = instance === 1 ? 18181 : 18182;
+                        // Wireproxy - show SOCKS5 info, get port from response
+                        const wireproxyPort = data.port || currentWireproxyInstances[instance - 1]?.port || '?';
                         message += `Wireproxy Configuration:\n`;
                         message += `• Type: SOCKS5 (WireGuard tunnel)\n`;
                         message += `• Local Port: ${wireproxyPort}\n\n`;
@@ -1095,6 +1160,123 @@
                     }
                     
                     alert(message);
+                    loadStatus();
+                } else {
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        // HAProxy Management Functions
+        
+        function autoCalculateStatsPort() {
+            const sockPort = document.getElementById('haproxy-sock-port').value;
+            const statsPortInput = document.getElementById('haproxy-stats-port');
+            
+            if (sockPort && !isNaN(sockPort)) {
+                const calculatedStatsPort = parseInt(sockPort) + 200;
+                statsPortInput.value = calculatedStatsPort;
+            } else {
+                statsPortInput.value = '';
+            }
+        }
+        
+        function openAddHAProxyModal() {
+            document.getElementById('add-haproxy-modal').classList.add('active');
+            document.getElementById('add-haproxy-alert').innerHTML = '';
+            document.getElementById('haproxy-sock-port').value = '';
+            document.getElementById('haproxy-stats-port').value = '';
+            document.getElementById('haproxy-wg-ports').value = '';
+        }
+        
+        function closeAddHAProxyModal() {
+            document.getElementById('add-haproxy-modal').classList.remove('active');
+        }
+        
+        async function createHAProxyService() {
+            const sockPort = document.getElementById('haproxy-sock-port').value;
+            const statsPort = document.getElementById('haproxy-stats-port').value;
+            const wgPortsStr = document.getElementById('haproxy-wg-ports').value;
+            
+            // Validate inputs
+            if (!sockPort) {
+                document.getElementById('add-haproxy-alert').innerHTML = 
+                    '<div class="alert alert-error">SOCKS Port is required</div>';
+                return;
+            }
+            
+            // Parse WG ports
+            let wgPorts = [];
+            if (wgPortsStr.trim()) {
+                wgPorts = wgPortsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+            }
+            
+            try {
+                const response = await fetch('/api/haproxy/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sock_port: parseInt(sockPort),
+                        stats_port: statsPort ? parseInt(statsPort) : null,
+                        wg_ports: wgPorts
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ ${data.message}\n\nSOCKS Port: ${data.service.sock_port}\nStats Port: ${data.service.stats_port}\nBackends: ${data.service.wg_ports.join(', ') || 'default'}`);
+                    closeAddHAProxyModal();
+                    loadStatus();
+                } else {
+                    document.getElementById('add-haproxy-alert').innerHTML = 
+                        `<div class="alert alert-error">Error: ${data.error}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('add-haproxy-alert').innerHTML = 
+                    `<div class="alert alert-error">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function deleteHAProxyService(port) {
+            if (!confirm(`Are you sure you want to delete HAProxy service on port ${port}?\n\nThis will stop the service and remove its configuration.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/haproxy/delete/${port}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ ${data.message}`);
+                    loadStatus();
+                } else {
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function deleteWireproxy(instance, port) {
+            if (!confirm(`Are you sure you want to delete Wireproxy ${instance} (port ${port})?\n\nThis will:\n- Stop the service if running\n- Delete the config file (wg${port}.conf)\n- Clean up log files\n\nThis action cannot be undone!`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/wireproxy/delete/${instance}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`✅ ${data.message}`);
                     loadStatus();
                 } else {
                     alert(`❌ Error: ${data.error}`);

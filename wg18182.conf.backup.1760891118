@@ -1,0 +1,13 @@
+[Interface]
+PrivateKey = mHp/fZJpapyDKr4QT1SVZGg5xgNkpJUKNCXVk7P7yk4=
+Address = 10.2.0.2/32
+DNS = 10.2.0.1
+
+[Peer]
+PublicKey = kYWXMo4RQ08rekIUo0keVmqRkfhPrB8Y288ZQ7ZMYjU=
+Endpoint = 149.40.63.129:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+
+[Socks5]
+BindAddress = 127.0.0.1:18182
