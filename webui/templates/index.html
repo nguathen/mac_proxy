@@ -946,8 +946,11 @@
                     <div style="margin-bottom: 5px;"><strong>City:</strong> ${server.city || 'N/A'}</div>
                     <div style="margin-bottom: 5px;"><strong>Tier:</strong> ${tierText}</div>
                     <div style="margin-bottom: 5px;"><strong>Load:</strong> <span style="color: ${loadColor}; font-weight: bold;">${loadPercent}%</span></div>
-                    <div style="margin-bottom: 5px;"><strong>Status:</strong> ${server.status === 1 ? '✅ Online' : '❌ Offline'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Status:</strong> ${server.status === 'online' ? '✅ Online' : '❌ Offline'}</div>
                     <div style="margin-bottom: 5px;"><strong>Score:</strong> ${server.score ? server.score.toFixed(2) : 'N/A'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Entry IP:</strong> ${server.entry_ip || 'N/A'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Domain:</strong> ${server.domain || 'N/A'}</div>
+                    <div style="margin-bottom: 5px;"><strong>Public Key:</strong> <code style="font-size: 0.85em; background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">${server.public_key || 'N/A'}</code></div>
                 </div>
             `;
             

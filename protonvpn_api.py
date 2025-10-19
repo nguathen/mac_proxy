@@ -9,7 +9,7 @@ import json
 from typing import List, Dict, Optional
 import os
 
-PROTONVPN_API_URL = "https://api.protonvpn.ch/vpn/logicals"
+PROTONVPN_API_URL = "https://account.proton.me/api/vpn/v1/logicals"
 CACHE_FILE = "protonvpn_servers_cache.json"
 CACHE_DURATION = 3600  # 1 hour
 
@@ -19,6 +19,9 @@ PROTONVPN_AUTH = {
     'bearer_token': '',  # User's bearer token
     'uid': ''  # User's UID
 }
+
+# Default private key (user can override)
+DEFAULT_PRIVATE_KEY = "mHp/fZJpapyDKr4QT1SVZGg5xgNkpJUKNCXVk7P7yk4="
 
 class ProtonVPNAPI:
     def __init__(self, cache_file=CACHE_FILE, bearer_token='', uid=''):
@@ -49,7 +52,12 @@ class ProtonVPNAPI:
         # Fetch from API
         try:
             headers = {
-                'x-pm-appversion': 'browser-vpn@1.2.9',
+                'x-pm-single-group': 'vpn-paid',
+                'x-pm-apiversion': '3',
+                'x-pm-appversion': 'windows-vpn@4.3.1-dev+X64',
+                'x-pm-locale': 'en-US',
+                'User-Agent': 'ProtonVPN/4.3.1],[(Microsoft Windows NT 10.0.26100.0; X64)',
+                'x-pm-timezone': 'Asia/Bangkok',
                 'Authorization': f'Bearer {self.bearer_token}',
                 'x-pm-uid': self.uid,
                 'Accept': 'application/json'
@@ -112,6 +120,10 @@ class ProtonVPNAPI:
                         'code': country,
                         'city': city
                     },
+                    # Flatten for easier UI access
+                    'country_name': self._get_country_name(country),
+                    'country_code': country,
+                    'city': city,
                     'load': load,
                     'status': status,
                     'tier': tier,
@@ -244,11 +256,15 @@ class ProtonVPNAPI:
         # Sort by load and score
         return min(online_servers, key=lambda x: (x['load'], -x['score']))
     
-    def generate_wireguard_config(self, server: Dict, private_key: str, 
+    def generate_wireguard_config(self, server: Dict, private_key: str = None, 
                                   address: str = "10.2.0.2/32", 
                                   dns: str = "10.2.0.1",
                                   bind_address: str = "127.0.0.1:18181") -> Dict:
         """Tạo config WireGuard từ thông tin server"""
+        
+        # Use default private key if not provided
+        if not private_key:
+            private_key = DEFAULT_PRIVATE_KEY
         
         config = {
             'interface': {
