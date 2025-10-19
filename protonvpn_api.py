@@ -30,6 +30,31 @@ class ProtonVPNAPI:
         self.bearer_token = bearer_token or PROTONVPN_AUTH.get('bearer_token', '')
         self.uid = uid or PROTONVPN_AUTH.get('uid', '')
     
+    def _refresh_credentials(self):
+        """Lấy token và uid mới từ API"""
+        try:
+            response = requests.get('http://localhost:5267/mmo/GetAuthProtonVpn', timeout=5)
+            if response.status_code == 200:
+                data = response.text.strip()
+                # Format: token:uid
+                if ':' in data:
+                    parts = data.split(':', 1)
+                    self.bearer_token = parts[0]
+                    self.uid = parts[1]
+                    return True
+                else:
+                    # Try JSON format
+                    try:
+                        json_data = response.json()
+                        self.bearer_token = json_data.get('token', '')
+                        self.uid = json_data.get('uid', '')
+                        return bool(self.bearer_token and self.uid)
+                    except:
+                        pass
+        except Exception as e:
+            print(f"Failed to refresh credentials: {e}")
+        return False
+    
     def fetch_servers(self, force_refresh=False) -> List[Dict]:
         """Lấy danh sách server từ ProtonVPN API hoặc cache"""
         
@@ -45,9 +70,10 @@ class ProtonVPNAPI:
             except Exception:
                 pass
         
-        # Check if we have credentials
+        # Try to refresh credentials if not available
         if not self.bearer_token or not self.uid:
-            raise Exception("ProtonVPN credentials not provided. Please set bearer_token and uid.")
+            if not self._refresh_credentials():
+                raise Exception("ProtonVPN credentials not provided and failed to refresh from API.")
         
         # Fetch from API
         try:
@@ -69,6 +95,16 @@ class ProtonVPNAPI:
             }
             
             response = requests.get(PROTONVPN_API_URL, headers=headers, params=params, timeout=30)
+            
+            # If 401 Unauthorized, try to refresh credentials and retry once
+            if response.status_code == 401:
+                if self._refresh_credentials():
+                    # Update headers with new credentials
+                    headers['Authorization'] = f'Bearer {self.bearer_token}'
+                    headers['x-pm-uid'] = self.uid
+                    # Retry request
+                    response = requests.get(PROTONVPN_API_URL, headers=headers, params=params, timeout=30)
+            
             response.raise_for_status()
             
             raw_data = response.json()
@@ -114,6 +150,7 @@ class ProtonVPNAPI:
                     'name': server.get('Name', ''),
                     'domain': server.get('Domain', ''),
                     'entry_ip': entry_ip,
+                    'exit_ip': physical_servers[0].get('ExitIP', entry_ip),
                     'public_key': x25519_key,
                     'country': {
                         'name': self._get_country_name(country),
@@ -129,7 +166,17 @@ class ProtonVPNAPI:
                     'tier': tier,
                     'tier_name': tier_name,
                     'features': features,
-                    'score': server.get('Score', 0)
+                    'score': server.get('Score', 0),
+                    # Physical servers info for proxy configuration
+                    'servers': [
+                        {
+                            'domain': srv.get('Domain', ''),
+                            'entry_ip': srv.get('EntryIP', ''),
+                            'exit_ip': srv.get('ExitIP', ''),
+                            'label': srv.get('Label', '')
+                        }
+                        for srv in physical_servers
+                    ]
                 }
                 
                 self.servers.append(server_info)

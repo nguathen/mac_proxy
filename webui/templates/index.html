@@ -316,6 +316,17 @@
                 </div>
             </div>
             
+            <!-- HTTPS Proxy Card -->
+            <div class="card">
+                <h2>🌐 HTTPS Proxy Services</h2>
+                <div id="https-proxy-status"></div>
+                <div class="btn-group">
+                    <button class="btn btn-success" onclick="controlHTTPSProxy('start')">Start All</button>
+                    <button class="btn btn-danger" onclick="controlHTTPSProxy('stop')">Stop All</button>
+                    <button class="btn btn-warning" onclick="controlHTTPSProxy('restart')">Restart All</button>
+                </div>
+            </div>
+            
             <!-- HAProxy Card -->
             <div class="card">
                 <h2>⚡ HAProxy Services</h2>
@@ -362,7 +373,11 @@
         <!-- ProtonVPN Management -->
         <div class="card">
             <h2>🔐 ProtonVPN Server Selection</h2>
-            <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào wireproxy instance</p>
+            <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào proxy instance</p>
+            <div style="background: #d1ecf1; border: 1px solid #0dcaf0; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em;">
+                ℹ️ <strong>Wireproxy:</strong> WireGuard tunnel (SOCKS5)<br>
+                ℹ️ <strong>HTTPS Proxy:</strong> Direct connection với domain (HTTP/HTTPS)
+            </div>
             
             <div class="config-field">
                 <label>Select Country:</label>
@@ -384,8 +399,14 @@
             </div>
             
             <div class="btn-group">
-                <button class="btn btn-success" onclick="applyProtonVPNServer(1)">Apply to Wireproxy 1</button>
-                <button class="btn btn-success" onclick="applyProtonVPNServer(2)">Apply to Wireproxy 2</button>
+                <button class="btn btn-success" onclick="applyProtonVPNServer(1, 'wireproxy')">Apply to Wireproxy 1</button>
+                <button class="btn btn-success" onclick="applyProtonVPNServer(2, 'wireproxy')">Apply to Wireproxy 2</button>
+            </div>
+            <div class="btn-group" style="margin-top: 10px;">
+                <button class="btn btn-primary" onclick="applyProtonVPNServer(1, 'https')">Apply to HTTPS Proxy 1 (8181)</button>
+                <button class="btn btn-primary" onclick="applyProtonVPNServer(2, 'https')">Apply to HTTPS Proxy 2 (8182)</button>
+            </div>
+            <div class="btn-group" style="margin-top: 10px;">
                 <button class="btn btn-info" onclick="loadProtonVPNCountries()">🔄 Refresh</button>
             </div>
         </div>
@@ -471,6 +492,27 @@
                     </div>
                 `}).join('');
                 document.getElementById('wireproxy-status').innerHTML = wireproxyHtml;
+                
+                // Update HTTPS Proxy status
+                const httpsProxyHtml = data.https_proxy.map(hp => `
+                    <div class="service-item">
+                        <div class="service-header">
+                            <span class="service-name">
+                                <span class="status-indicator ${hp.running ? 'status-running' : 'status-stopped'}"></span>
+                                ${hp.name}
+                            </span>
+                        </div>
+                        <div class="service-info">Port: ${hp.port}</div>
+                        <div class="service-info">Status: ${hp.running ? '✅ Running' : '❌ Stopped'}</div>
+                        ${hp.running ? `<div class="service-info">Connection: ${hp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
+                        ${hp.pid ? `<div class="service-info">PID: ${hp.pid}</div>` : ''}
+                        <div class="btn-group">
+                            <button class="btn btn-info" onclick="testHTTPSProxy('${hp.port}')">Test</button>
+                            <button class="btn btn-primary" onclick="viewLogs('https_proxy_${hp.port}')">Logs</button>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('https-proxy-status').innerHTML = httpsProxyHtml;
                 
                 // Update HAProxy status
                 const haproxyHtml = data.haproxy.map(hp => `
@@ -656,13 +698,13 @@
                 // Show success message
                 document.getElementById('config-alert').innerHTML = '<div class="alert alert-success">Config saved! Restarting wireproxy...</div>';
                 
-                // Restart wireproxy
+                // Restart only the specific wireproxy instance
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                const restartResponse = await fetch('/api/wireproxy/restart', { method: 'POST' });
+                const restartResponse = await fetch(`/api/wireproxy/${currentInstance}/restart`, { method: 'POST' });
                 const restartData = await restartResponse.json();
                 
                 if (restartData.success) {
-                    alert('Config saved and wireproxy restarted successfully!');
+                    alert(`Config saved and Wireproxy ${currentInstance} restarted successfully!`);
                     closeConfigModal();
                     loadStatus();
                 } else {
@@ -706,6 +748,37 @@
                 }
             } catch (error) {
                 alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function testHTTPSProxy(port) {
+            try {
+                const response = await fetch(`https://api.ipify.org`, {
+                    method: 'GET'
+                });
+                
+                // Simple test - just check if we can reach the endpoint
+                alert(`Testing HTTPS proxy on port ${port}...\n\nPlease use: curl -x http://127.0.0.1:${port} https://api.ipify.org`);
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function controlHTTPSProxy(action) {
+            if (!confirm(`Are you sure you want to ${action} all HTTPS proxy instances?`)) return;
+            
+            try {
+                const response = await fetch(`/api/manage_https_proxy/${action}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`HTTPS Proxy ${action} successful!`);
+                    loadStatus();
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
             }
         }
         
@@ -958,7 +1031,7 @@
             document.getElementById('protonvpn-server-info').style.display = 'block';
         }
         
-        async function applyProtonVPNServer(instance) {
+        async function applyProtonVPNServer(instance, type = 'wireproxy') {
             const serverSelect = document.getElementById('protonvpn-server');
             const serverName = serverSelect.value;
             
@@ -967,12 +1040,25 @@
                 return;
             }
             
-            if (!confirm(`Apply ProtonVPN server "${serverName}" to Wireproxy ${instance}?\n\nThis will restart the wireproxy instance.`)) {
+            let confirmMsg = '';
+            let apiUrl = '';
+            
+            if (type === 'https') {
+                const httpsPort = instance === 1 ? 8181 : 8182;
+                confirmMsg = `Apply ProtonVPN server "${serverName}" to HTTPS Proxy ${instance} (port ${httpsPort})?\n\nThis will use domain-based connection.`;
+                apiUrl = `/api/protonvpn/apply/https/${instance}`;
+            } else {
+                const wireproxyPort = instance === 1 ? 18181 : 18182;
+                confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy ${instance} (port ${wireproxyPort})?\n\nThis will create WireGuard tunnel.`;
+                apiUrl = `/api/protonvpn/apply/${instance}`;
+            }
+            
+            if (!confirm(confirmMsg)) {
                 return;
             }
             
             try {
-                const response = await fetch(`/api/protonvpn/apply/${instance}`, {
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ server_name: serverName })
@@ -982,7 +1068,33 @@
                 
                 if (data.success) {
                     const server = data.server;
-                    alert(`✅ ${data.message}\n\nServer: ${server.name}\nCountry: ${server.country_name}\nCity: ${server.city || 'N/A'}\nLoad: ${server.load || 0}%`);
+                    const proxyConfig = data.proxy_config;
+                    
+                    let message = `✅ ${data.message}\n\n`;
+                    message += `Server: ${server.name}\n`;
+                    message += `Country: ${server.country_name}\n`;
+                    message += `City: ${server.city || 'N/A'}\n`;
+                    message += `Load: ${server.load || 0}%\n\n`;
+                    
+                    // Show proxy config if available (HTTPS proxy)
+                    if (proxyConfig && proxyConfig.host) {
+                        message += `Proxy Configuration:\n`;
+                        message += `• Upstream: ${proxyConfig.host}:${proxyConfig.port}\n`;
+                        message += `• Local Port: ${proxyConfig.local_port}\n`;
+                        message += `• Username: ${proxyConfig.username}\n\n`;
+                        message += `Test with:\n`;
+                        message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://api.ipify.org`;
+                    } else {
+                        // Wireproxy - show SOCKS5 info
+                        const wireproxyPort = instance === 1 ? 18181 : 18182;
+                        message += `Wireproxy Configuration:\n`;
+                        message += `• Type: SOCKS5 (WireGuard tunnel)\n`;
+                        message += `• Local Port: ${wireproxyPort}\n\n`;
+                        message += `Test with:\n`;
+                        message += `curl -x socks5://127.0.0.1:${wireproxyPort} https://api.ipify.org`;
+                    }
+                    
+                    alert(message);
                     loadStatus();
                 } else {
                     alert(`❌ Error: ${data.error}`);

@@ -27,6 +27,12 @@ echo "🔐 Starting Wireproxy instances..."
 chmod +x manage_wireproxy.sh
 ./manage_wireproxy.sh start
 
+# Khởi động HTTPS Proxy
+echo ""
+echo "🌐 Starting HTTPS Proxy instances..."
+chmod +x manage_https_proxy.sh
+./manage_https_proxy.sh start
+
 # Kiểm tra Cloudflare WARP
 echo ""
 echo "🔍 Kiểm tra Cloudflare WARP..."
@@ -93,8 +99,10 @@ echo "✅ Hệ thống đã khởi động"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📊 Thông tin proxy:"
-echo "   • HAProxy 1: socks5://0.0.0.0:7891"
-echo "   • HAProxy 2: socks5://0.0.0.0:7892"
+echo "   • HAProxy 1 (SOCKS5): socks5://0.0.0.0:7891"
+echo "   • HAProxy 2 (SOCKS5): socks5://0.0.0.0:7892"
+echo "   • HTTPS Proxy 1: http://0.0.0.0:8181"
+echo "   • HTTPS Proxy 2: http://0.0.0.0:8182"
 echo ""
 echo "📈 HAProxy Stats:"
 echo "   • Instance 1: http://0.0.0.0:8091/haproxy?stats"
@@ -113,7 +121,9 @@ echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"
 echo "   • Dừng hệ thống: ./stop_all.sh"
 echo "   • Xem logs: tail -f logs/haproxy_health_*.log"
-echo "   • Test proxy 1: curl -x socks5h://127.0.0.1:7891 https://api.ipify.org"
-echo "   • Test proxy 2: curl -x socks5h://127.0.0.1:7892 https://api.ipify.org"
+echo "   • Test SOCKS5 proxy 1: curl -x socks5h://127.0.0.1:7891 https://api.ipify.org"
+echo "   • Test SOCKS5 proxy 2: curl -x socks5h://127.0.0.1:7892 https://api.ipify.org"
+echo "   • Test HTTPS proxy 1: curl -x http://127.0.0.1:8181 https://api.ipify.org"
+echo "   • Test HTTPS proxy 2: curl -x http://127.0.0.1:8182 https://api.ipify.org"
 echo ""
 

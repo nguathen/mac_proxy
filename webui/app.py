@@ -10,6 +10,7 @@ import os
 import re
 import json
 import sys
+import requests
 from datetime import datetime
 
 # Add parent directory to path to import modules
@@ -163,6 +164,7 @@ def api_status():
     status = {
         'wireproxy': [],
         'haproxy': [],
+        'https_proxy': [],
         'timestamp': datetime.now().isoformat()
     }
     
@@ -175,6 +177,7 @@ def api_status():
         running = False
         pid = None
         
+        # Try to get PID from file
         if os.path.exists(pid_file):
             try:
                 with open(pid_file) as f:
@@ -183,7 +186,30 @@ def api_status():
                     os.kill(pid, 0)
                     running = True
             except (OSError, ValueError):
-                pass
+                # PID file exists but process not running, clean up
+                try:
+                    os.remove(pid_file)
+                except:
+                    pass
+        
+        # If PID check failed, try to find process by port
+        if not running:
+            result = run_command(f'lsof -ti :{port}')
+            if result['success'] and result['stdout'].strip():
+                try:
+                    pid = int(result['stdout'].strip().split('\n')[0])
+                    # Verify it's wireproxy process
+                    check = run_command(f'ps -p {pid} -o command=')
+                    if check['success'] and 'wireproxy' in check['stdout']:
+                        running = True
+                        # Update PID file
+                        try:
+                            with open(pid_file, 'w') as f:
+                                f.write(str(pid))
+                        except:
+                            pass
+                except (ValueError, IndexError):
+                    pass
         
         # Test connection
         connection_ok = False
@@ -221,6 +247,35 @@ def api_status():
             'running': running,
             'pid': pid,
             'stats_url': f'http://127.0.0.1:809{port[-1]}/haproxy?stats'
+        })
+    
+    # Check HTTPS Proxy
+    for i, port in enumerate(['8181', '8182'], 1):
+        pid_file = os.path.join(LOG_DIR, f'https_proxy_{port}.pid')
+        running = False
+        pid = None
+        
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                    os.kill(pid, 0)
+                    running = True
+            except (OSError, ValueError):
+                pass
+        
+        # Test connection
+        connection_ok = False
+        if running:
+            result = run_command(f'curl -s --max-time 3 -x http://127.0.0.1:{port} https://api.ipify.org')
+            connection_ok = result['success'] and result['stdout'].strip()
+        
+        status['https_proxy'].append({
+            'name': f'HTTPS Proxy {i}',
+            'port': port,
+            'running': running,
+            'pid': pid,
+            'connection': connection_ok
         })
     
     return jsonify(status)
@@ -417,6 +472,20 @@ def api_haproxy_action(action):
         'error': result['stderr']
     })
 
+@app.route('/api/manage_https_proxy/<action>', methods=['POST'])
+def api_https_proxy_action(action):
+    """Điều khiển HTTPS Proxy (start/stop/restart)"""
+    if action not in ['start', 'stop', 'restart']:
+        return jsonify({'success': False, 'error': 'Invalid action'}), 400
+    
+    result = run_command(f'bash manage_https_proxy.sh {action}')
+    
+    return jsonify({
+        'success': result['success'],
+        'output': result['stdout'],
+        'error': result['stderr']
+    })
+
 @app.route('/api/logs/<service>')
 def api_get_logs(service):
     """Lấy logs"""
@@ -424,7 +493,9 @@ def api_get_logs(service):
         'wireproxy1': 'wireproxy1.log',
         'wireproxy2': 'wireproxy2.log',
         'haproxy1': 'haproxy_health_7891.log',
-        'haproxy2': 'haproxy_health_7892.log'
+        'haproxy2': 'haproxy_health_7892.log',
+        'https_proxy_8181': 'https_proxy_8181.log',
+        'https_proxy_8182': 'https_proxy_8182.log'
     }
     
     if service not in log_files:
@@ -555,19 +626,17 @@ def api_nordvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Get current config to preserve private key
+        # Get config path
         config_path = WG1_CONF if instance == 1 else WG2_CONF
+        
+        # Try to get private key from current config, otherwise use default
+        private_key = None
         current_config = parse_wireproxy_config(config_path)
-        
-        if not current_config or 'PrivateKey' not in current_config.get('interface', {}):
-            return jsonify({
-                'success': False,
-                'error': 'Cannot read current private key'
-            }), 500
-        
-        private_key = current_config['interface']['PrivateKey']
+        if current_config and 'PrivateKey' in current_config.get('interface', {}):
+            private_key = current_config['interface']['PrivateKey']
         
         # Generate new config with NordVPN server
+        # If private_key is None, nordvpn_api will use DEFAULT_PRIVATE_KEY
         bind_address = f"127.0.0.1:1818{instance}"
         new_config = nordvpn_api.generate_wireguard_config(
             server=server,
@@ -737,9 +806,9 @@ def api_protonvpn_best_server():
             'error': str(e)
         }), 500
 
-@app.route('/api/protonvpn/apply/<int:instance>', methods=['POST'])
-def api_protonvpn_apply_server(instance):
-    """Áp dụng ProtonVPN server vào wireproxy instance"""
+@app.route('/api/protonvpn/apply/https/<int:instance>', methods=['POST'])
+def api_protonvpn_apply_https_proxy(instance):
+    """Áp dụng ProtonVPN server vào HTTPS Proxy instance"""
     try:
         if instance not in [1, 2]:
             return jsonify({'success': False, 'error': 'Invalid instance'}), 400
@@ -758,19 +827,168 @@ def api_protonvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Get current config to preserve private key
-        config_path = WG1_CONF if instance == 1 else WG2_CONF
-        current_config = parse_wireproxy_config(config_path)
-        
-        if not current_config or 'PrivateKey' not in current_config.get('interface', {}):
+        # Get proxy credentials from API
+        try:
+            creds_response = requests.get('http://localhost:5267/mmo/getpassproxy', timeout=5)
+            if creds_response.status_code == 200:
+                try:
+                    creds_data = creds_response.json()
+                    proxy_username = creds_data.get('username', '')
+                    proxy_password = creds_data.get('password', '')
+                    
+                    if not proxy_username or not proxy_password:
+                        return jsonify({
+                            'success': False,
+                            'error': 'API returned empty username or password'
+                        }), 500
+                except ValueError:
+                    # API trả về plain text: username:password
+                    response_text = creds_response.text.strip()
+                    if ':' in response_text:
+                        parts = response_text.split(':', 1)
+                        proxy_username = parts[0]
+                        proxy_password = parts[1]
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': f'Invalid credentials format: {response_text[:100]}'
+                        }), 500
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to get credentials: HTTP {creds_response.status_code}'
+                }), 500
+        except requests.exceptions.RequestException as e:
             return jsonify({
                 'success': False,
-                'error': 'Cannot read current private key'
+                'error': f'Cannot connect to credentials API: {str(e)}'
             }), 500
         
-        private_key = current_config['interface']['PrivateKey']
+        # Get domain from physical servers
+        servers_list = server.get('servers', [])
+        if not servers_list:
+            return jsonify({
+                'success': False,
+                'error': f"Server {server.get('name')} has no physical servers data"
+            }), 404
+        
+        # Get domain and label from first physical server
+        first_server = servers_list[0]
+        server_domain = first_server.get('domain')
+        if not server_domain:
+            return jsonify({
+                'success': False,
+                'error': 'Server domain not found'
+            }), 404
+        
+        # Get label for port calculation
+        label_str = first_server.get('label')
+        if label_str is None:
+            return jsonify({
+                'success': False,
+                'error': 'Server label not found'
+            }), 404
+        
+        try:
+            label = int(label_str)
+        except (ValueError, TypeError):
+            return jsonify({
+                'success': False,
+                'error': f'Invalid label: {label_str}'
+            }), 404
+        
+        proxy_port = 4443 + label  # Calculate port: 4443 + label
+        
+        # Configure HTTPS proxy (Python wrapper)
+        https_port = 8181 if instance == 1 else 8182
+        pid_file = os.path.join(LOG_DIR, f'https_proxy_{https_port}.pid')
+        
+        # Stop if running
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file) as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, 15)
+                os.remove(pid_file)
+            except (OSError, ValueError):
+                pass
+        
+        import time
+        time.sleep(1)
+        
+        # Kill any process on the port
+        run_command(f'lsof -ti :{https_port} | xargs kill -9 2>/dev/null || true')
+        time.sleep(1)
+        
+        # Start Python proxy wrapper with DOMAIN
+        stdout_log = os.path.join(LOG_DIR, f'https_proxy_{https_port}_stdout.log')
+        proxy_wrapper = os.path.join(BASE_DIR, 'https_proxy_wrapper.py')
+        
+        cmd = f'nohup python3 {proxy_wrapper} --port {https_port} --upstream-host {server_domain} --upstream-port {proxy_port} --upstream-user "{proxy_username}" --upstream-pass "{proxy_password}" > {stdout_log} 2>&1 & echo $!'
+        result = run_command(cmd)
+        
+        if result['success']:
+            pid = result['stdout'].strip()
+            with open(pid_file, 'w') as f:
+                f.write(pid)
+            
+            name = server.get('name', 'Unknown')
+            return jsonify({
+                'success': True,
+                'message': f'Applied ProtonVPN {name} to HTTPS Proxy {instance}',
+                'server': server,
+                'proxy_config': {
+                    'host': server_domain,
+                    'port': proxy_port,
+                    'local_port': https_port,
+                    'username': proxy_username[:20] + '...'
+                },
+                'pid': pid
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['stderr']
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/protonvpn/apply/<int:instance>', methods=['POST'])
+def api_protonvpn_apply_server(instance):
+    """Áp dụng ProtonVPN server vào Wireproxy instance"""
+    try:
+        if instance not in [1, 2]:
+            return jsonify({'success': False, 'error': 'Invalid instance'}), 400
+        
+        if not protonvpn_api:
+            return jsonify({'success': False, 'error': 'ProtonVPN API not configured'}), 400
+        
+        data = request.json
+        server_name = data.get('server_name')
+        
+        if not server_name:
+            return jsonify({'success': False, 'error': 'No server_name provided'}), 400
+        
+        # Get server info
+        server = protonvpn_api.get_server_by_name(server_name)
+        if not server:
+            return jsonify({'success': False, 'error': 'Server not found'}), 404
+        
+        # Get config path
+        config_path = WG1_CONF if instance == 1 else WG2_CONF
+        
+        # Try to get private key from current config, otherwise use default
+        private_key = None
+        current_config = parse_wireproxy_config(config_path)
+        if current_config and 'PrivateKey' in current_config.get('interface', {}):
+            private_key = current_config['interface']['PrivateKey']
         
         # Generate new config with ProtonVPN server
+        # If private_key is None, protonvpn_api will use DEFAULT_PRIVATE_KEY
         bind_address = f"127.0.0.1:1818{instance}"
         new_config = protonvpn_api.generate_wireguard_config(
             server=server,
@@ -860,4 +1078,3 @@ if __name__ == '__main__':
     print("=" * 60)
     
     app.run(host='0.0.0.0', port=5000, debug=True)
-

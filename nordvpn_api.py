@@ -13,6 +13,9 @@ NORDVPN_API_URL = "https://api.nordvpn.com/v1"
 CACHE_FILE = "nordvpn_servers_cache.json"
 CACHE_DURATION = 3600  # 1 hour
 
+# Default private key for NordVPN
+DEFAULT_PRIVATE_KEY = "ECDeW1Oi8TC5reUZcyp8n3KAOaDVz3ZXZB5tu1+8Ik4="
+
 class NordVPNAPI:
     def __init__(self, cache_file=CACHE_FILE):
         self.cache_file = cache_file
@@ -173,11 +176,15 @@ class NordVPNAPI:
         # Sort by load
         return min(online_servers, key=lambda x: x['load'])
     
-    def generate_wireguard_config(self, server: Dict, private_key: str, 
+    def generate_wireguard_config(self, server: Dict, private_key: str = None, 
                                   address: str = "10.5.0.2/16", 
                                   dns: str = "103.86.96.100",
                                   bind_address: str = "127.0.0.1:18181") -> Dict:
         """Tạo config WireGuard từ thông tin server"""
+        
+        # Use default private key if not provided
+        if not private_key:
+            private_key = DEFAULT_PRIVATE_KEY
         
         config = {
             'interface': {

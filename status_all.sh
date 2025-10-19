@@ -68,6 +68,23 @@ for port in 18181 18182; do
     fi
 done
 
+# Kiểm tra HTTPS proxy backends
+echo ""
+echo "🌐 HTTPS Proxy Backends:"
+for port in 8181 8182; do
+    if nc -z 127.0.0.1 $port 2>/dev/null; then
+        # Test với curl
+        ip=$(curl -s --max-time 5 -x http://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
+        if [ "$ip" != "N/A" ]; then
+            echo "  ✅ HTTPS proxy port $port: Online (IP: $ip)"
+        else
+            echo "  ⚠️  HTTPS proxy port $port: Port open but not responding"
+        fi
+    else
+        echo "  ❌ HTTPS proxy port $port: Offline"
+    fi
+done
+
 # Kiểm tra Cloudflare WARP
 echo ""
 echo "☁️  Cloudflare WARP (Fallback):"
