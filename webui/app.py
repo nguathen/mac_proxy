@@ -699,7 +699,7 @@ DNS = 103.86.96.100
 PublicKey = aUuKVXQ//4UnXcPOqai/qGTfUK6qrdNRa6crPCF32x4=
 Endpoint = 185.153.177.126:51820
 AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25
+PersistentKeepalive = 15
 
 [Socks5]
 BindAddress = 127.0.0.1:{port}
@@ -1150,14 +1150,12 @@ def api_nordvpn_apply_server(instance):
         config_path = wireproxy_configs[instance - 1]['config']
         port = wireproxy_configs[instance - 1]['port']
         
-        # Try to get private key from current config, otherwise use default
-        private_key = None
-        current_config = parse_wireproxy_config(config_path)
-        if current_config and 'PrivateKey' in current_config.get('interface', {}):
-            private_key = current_config['interface']['PrivateKey']
+        # Use NordVPN private key (always use default for NordVPN)
+        # NordVPN requires provider-specific key, don't reuse from config
+        from nordvpn_api import DEFAULT_PRIVATE_KEY as NORDVPN_PRIVATE_KEY
+        private_key = NORDVPN_PRIVATE_KEY
         
         # Generate new config with NordVPN server
-        # If private_key is None, nordvpn_api will use DEFAULT_PRIVATE_KEY
         bind_address = f"127.0.0.1:{port}"
         new_config = nordvpn_api.generate_wireguard_config(
             server=server,
@@ -1521,14 +1519,12 @@ def api_protonvpn_apply_server(instance):
         config_path = wireproxy_configs[instance - 1]['config']
         port = wireproxy_configs[instance - 1]['port']
         
-        # Try to get private key from current config, otherwise use default
-        private_key = None
-        current_config = parse_wireproxy_config(config_path)
-        if current_config and 'PrivateKey' in current_config.get('interface', {}):
-            private_key = current_config['interface']['PrivateKey']
+        # Use ProtonVPN private key (always use default for ProtonVPN)
+        # ProtonVPN requires provider-specific key, don't reuse from config
+        from protonvpn_api import DEFAULT_PRIVATE_KEY as PROTONVPN_PRIVATE_KEY
+        private_key = PROTONVPN_PRIVATE_KEY
         
         # Generate new config with ProtonVPN server
-        # If private_key is None, protonvpn_api will use DEFAULT_PRIVATE_KEY
         bind_address = f"127.0.0.1:{port}"
         new_config = protonvpn_api.generate_wireguard_config(
             server=server,

@@ -14,8 +14,9 @@ CACHE_FILE = "nordvpn_servers_cache.json"
 CACHE_DURATION = 3600  # 1 hour
 
 # Default private key for NordVPN
-DEFAULT_PRIVATE_KEY = "ECDeW1Oi8TC5reUZcyp8n3KAOaDVz3ZXZB5tu1+8Ik4="
-
+# IMPORTANT: This private key must be generated from your NordVPN account
+# Get it from: https://my.nordaccount.com/ -> Services -> NordVPN -> Manual Setup -> WireGuard
+DEFAULT_PRIVATE_KEY = "kOv29TQ+T0iRgzbQI1wjgFovQQPCKqtj7DrnArxdvlg="
 class NordVPNAPI:
     def __init__(self, cache_file=CACHE_FILE):
         self.cache_file = cache_file
@@ -178,7 +179,7 @@ class NordVPNAPI:
     
     def generate_wireguard_config(self, server: Dict, private_key: str = None, 
                                   address: str = "10.5.0.2/16", 
-                                  dns: str = "103.86.96.100",
+                                  dns: str = "1.1.1.1",
                                   bind_address: str = "127.0.0.1:18181") -> Dict:
         """Tạo config WireGuard từ thông tin server"""
         
@@ -196,7 +197,7 @@ class NordVPNAPI:
                 'PublicKey': server['public_key'],
                 'Endpoint': f"{server['station']}:51820",
                 'AllowedIPs': '0.0.0.0/0',
-                'PersistentKeepalive': '25'
+                'PersistentKeepalive': '15'
             },
             'socks5': {
                 'BindAddress': bind_address

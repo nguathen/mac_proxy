@@ -20,7 +20,7 @@ PROTONVPN_AUTH = {
     'uid': ''  # User's UID
 }
 
-# Default private key (user can override)
+# Default private key for ProtonVPN (registered with account)
 DEFAULT_PRIVATE_KEY = "mHp/fZJpapyDKr4QT1SVZGg5xgNkpJUKNCXVk7P7yk4="
 
 class ProtonVPNAPI:
@@ -305,7 +305,7 @@ class ProtonVPNAPI:
     
     def generate_wireguard_config(self, server: Dict, private_key: str = None, 
                                   address: str = "10.2.0.2/32", 
-                                  dns: str = "10.2.0.1",
+                                  dns: str = "1.1.1.1",
                                   bind_address: str = "127.0.0.1:18181") -> Dict:
         """Tạo config WireGuard từ thông tin server"""
         
@@ -323,7 +323,7 @@ class ProtonVPNAPI:
                 'PublicKey': server['public_key'],
                 'Endpoint': f"{server['entry_ip']}:51820",
                 'AllowedIPs': '0.0.0.0/0',
-                'PersistentKeepalive': '25'
+                'PersistentKeepalive': '15'
             },
             'socks5': {
                 'BindAddress': bind_address

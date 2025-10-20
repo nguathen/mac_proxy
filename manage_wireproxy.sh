@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # manage_wireproxy.sh
-# Quản lý wireproxy instances
+# Quản lý wireproxy instances (auto-detect)
 
 set -euo pipefail
 
 WIREPROXY_BIN="./wireproxy"
-WG1_CONF="wg18181.conf"
-WG2_CONF="wg18182.conf"
 LOG_DIR="./logs"
 PID_DIR="./logs"
 
@@ -14,6 +12,22 @@ mkdir -p "$LOG_DIR"
 
 timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
+
+# Auto-detect wireproxy config files
+get_wireproxy_configs() {
+    # Find all wg*.conf files and extract port numbers
+    local configs=()
+    for conf in wg*.conf; do
+        if [ -f "$conf" ]; then
+            # Extract port from BindAddress line
+            local port=$(grep -E "^BindAddress" "$conf" | grep -oE '[0-9]+$' || echo "")
+            if [ -n "$port" ]; then
+                configs+=("$conf:$port")
+            fi
+        fi
+    done
+    echo "${configs[@]}"
+}
 
 check_and_kill_port() {
     local port=$1
@@ -63,37 +77,34 @@ check_and_kill_port() {
 start_wireproxy() {
     log "🚀 Starting wireproxy instances..."
     
-    # Check and kill any process using port 18181
-    check_and_kill_port 18181 "Wireproxy 1"
+    local configs=($(get_wireproxy_configs))
     
-    # Check and kill any process using port 18182
-    check_and_kill_port 18182 "Wireproxy 2"
-    
-    # Start wireproxy 1 (port 18181)
-    if [ -f "$WG1_CONF" ]; then
-        if [ -f "$PID_DIR/wireproxy1.pid" ] && kill -0 $(cat "$PID_DIR/wireproxy1.pid") 2>/dev/null; then
-            log "⚠️  Wireproxy 1 already running"
-        else
-            nohup "$WIREPROXY_BIN" -c "$WG1_CONF" > "$LOG_DIR/wireproxy1.log" 2>&1 &
-            echo $! > "$PID_DIR/wireproxy1.pid"
-            log "✅ Wireproxy 1 started (PID: $!, port 18181)"
-        fi
-    else
-        log "❌ Config file $WG1_CONF not found"
+    if [ ${#configs[@]} -eq 0 ]; then
+        log "❌ No wireproxy config files found (wg*.conf)"
+        return 1
     fi
     
-    # Start wireproxy 2 (port 18182)
-    if [ -f "$WG2_CONF" ]; then
-        if [ -f "$PID_DIR/wireproxy2.pid" ] && kill -0 $(cat "$PID_DIR/wireproxy2.pid") 2>/dev/null; then
-            log "⚠️  Wireproxy 2 already running"
+    local instance=1
+    for config_info in "${configs[@]}"; do
+        IFS=':' read -r conf_file port <<< "$config_info"
+        
+        # Check and kill any process using this port
+        check_and_kill_port "$port" "Wireproxy $instance"
+        
+        # Start wireproxy instance
+        local pid_file="$PID_DIR/wireproxy${instance}.pid"
+        
+        if [ -f "$pid_file" ] && kill -0 $(cat "$pid_file") 2>/dev/null; then
+            log "⚠️  Wireproxy $instance already running"
         else
-            nohup "$WIREPROXY_BIN" -c "$WG2_CONF" > "$LOG_DIR/wireproxy2.log" 2>&1 &
-            echo $! > "$PID_DIR/wireproxy2.pid"
-            log "✅ Wireproxy 2 started (PID: $!, port 18182)"
+            nohup "$WIREPROXY_BIN" -c "$conf_file" > "$LOG_DIR/wireproxy${instance}.log" 2>&1 &
+            local pid=$!
+            echo $pid > "$pid_file"
+            log "✅ Wireproxy $instance started (PID: $pid, port $port, config: $conf_file)"
         fi
-    else
-        log "❌ Config file $WG2_CONF not found"
-    fi
+        
+        ((instance++))
+    done
     
     sleep 2
     status_wireproxy
@@ -102,41 +113,45 @@ start_wireproxy() {
 stop_wireproxy() {
     log "🛑 Stopping wireproxy instances..."
     
-    # Stop wireproxy 1
-    if [ -f "$PID_DIR/wireproxy1.pid" ]; then
-        pid=$(cat "$PID_DIR/wireproxy1.pid")
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null && log "✅ Stopped wireproxy 1 (PID: $pid)"
-            rm -f "$PID_DIR/wireproxy1.pid"
-        else
-            log "⚠️  Wireproxy 1 not running (stale PID)"
-            rm -f "$PID_DIR/wireproxy1.pid"
+    # Find all wireproxy PID files
+    local configs=($(get_wireproxy_configs))
+    local instance=1
+    local stopped_any=false
+    
+    # Stop all wireproxy instances
+    for pid_file in "$PID_DIR"/wireproxy*.pid; do
+        if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid" 2>/dev/null && log "✅ Stopped wireproxy $instance (PID: $pid)"
+                stopped_any=true
+            else
+                log "⚠️  Wireproxy $instance not running (stale PID)"
+            fi
+            rm -f "$pid_file"
+            ((instance++))
         fi
+    done
+    
+    if [ "$stopped_any" = false ] && [ ! -f "$PID_DIR"/wireproxy*.pid ]; then
+        log "⚠️  No wireproxy instances running"
     fi
     
-    # Stop wireproxy 2
-    if [ -f "$PID_DIR/wireproxy2.pid" ]; then
-        pid=$(cat "$PID_DIR/wireproxy2.pid")
-        if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null && log "✅ Stopped wireproxy 2 (PID: $pid)"
-            rm -f "$PID_DIR/wireproxy2.pid"
-        else
-            log "⚠️  Wireproxy 2 not running (stale PID)"
-            rm -f "$PID_DIR/wireproxy2.pid"
-        fi
-    fi
-    
-    # Cleanup any remaining wireproxy processes on our ports
-    log "🧹 Cleaning up any remaining processes on ports 18181 and 18182..."
-    
-    # Kill any process on port 18181
-    if command -v lsof &> /dev/null; then
-        lsof -ti :18181 2>/dev/null | xargs -r kill -9 2>/dev/null || true
-        lsof -ti :18182 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+    # Cleanup any remaining wireproxy processes on detected ports
+    if [ ${#configs[@]} -gt 0 ]; then
+        log "🧹 Cleaning up any remaining processes on ports..."
+        
+        for config_info in "${configs[@]}"; do
+            IFS=':' read -r conf_file port <<< "$config_info"
+            
+            if command -v lsof &> /dev/null; then
+                lsof -ti ":$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+            fi
+        done
     fi
     
     # Also try to kill by process name pattern
-    pkill -9 -f "wireproxy.*wg1818" 2>/dev/null || true
+    pkill -9 -f "wireproxy.*wg" 2>/dev/null || true
     
     log "✅ Cleanup complete"
 }
@@ -151,40 +166,44 @@ restart_wireproxy() {
 status_wireproxy() {
     log "📊 Wireproxy Status:"
     
-    # Check wireproxy 1
-    if [ -f "$PID_DIR/wireproxy1.pid" ]; then
-        pid=$(cat "$PID_DIR/wireproxy1.pid")
-        if kill -0 "$pid" 2>/dev/null; then
-            log "  ✅ Wireproxy 1 (port 18181): Running (PID: $pid)"
-            # Test connection
-            if timeout 5 bash -c "curl -s --max-time 3 -x socks5h://127.0.0.1:18181 https://api.ipify.org" &>/dev/null; then
-                log "     🌐 Connection: OK"
-            else
-                log "     ⚠️  Connection: Failed"
-            fi
-        else
-            log "  ❌ Wireproxy 1: Not running"
-        fi
-    else
-        log "  ❌ Wireproxy 1: Not running"
+    local configs=($(get_wireproxy_configs))
+    
+    if [ ${#configs[@]} -eq 0 ]; then
+        log "  ❌ No wireproxy config files found"
+        return 1
     fi
     
-    # Check wireproxy 2
-    if [ -f "$PID_DIR/wireproxy2.pid" ]; then
-        pid=$(cat "$PID_DIR/wireproxy2.pid")
-        if kill -0 "$pid" 2>/dev/null; then
-            log "  ✅ Wireproxy 2 (port 18182): Running (PID: $pid)"
-            # Test connection
-            if timeout 5 bash -c "curl -s --max-time 3 -x socks5h://127.0.0.1:18182 https://api.ipify.org" &>/dev/null; then
-                log "     🌐 Connection: OK"
+    local instance=1
+    local any_running=false
+    
+    for config_info in "${configs[@]}"; do
+        IFS=':' read -r conf_file port <<< "$config_info"
+        local pid_file="$PID_DIR/wireproxy${instance}.pid"
+        
+        if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                log "  ✅ Wireproxy $instance (port $port): Running (PID: $pid)"
+                any_running=true
+                
+                # Test connection
+                if timeout 15 bash -c "curl -s --max-time 10 -x socks5h://127.0.0.1:$port https://api.ipify.org" &>/dev/null; then
+                    log "     🌐 Connection: OK"
+                else
+                    log "     ⚠️  Connection: Failed (may need more time to establish)"
+                fi
             else
-                log "     ⚠️  Connection: Failed"
+                log "  ❌ Wireproxy $instance (port $port): Not running"
             fi
         else
-            log "  ❌ Wireproxy 2: Not running"
+            log "  ❌ Wireproxy $instance (port $port): Not running"
         fi
-    else
-        log "  ❌ Wireproxy 2: Not running"
+        
+        ((instance++))
+    done
+    
+    if [ "$any_running" = false ]; then
+        log "  ⚠️  No wireproxy instances are running"
     fi
 }
 
