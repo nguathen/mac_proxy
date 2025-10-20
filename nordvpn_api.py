@@ -16,7 +16,7 @@ CACHE_DURATION = 3600  # 1 hour
 # Default private key for NordVPN
 # IMPORTANT: This private key must be generated from your NordVPN account
 # Get it from: https://my.nordaccount.com/ -> Services -> NordVPN -> Manual Setup -> WireGuard
-DEFAULT_PRIVATE_KEY = "kOv29TQ+T0iRgzbQI1wjgFovQQPCKqtj7DrnArxdvlg="
+DEFAULT_PRIVATE_KEY = "ECDeW1Oi8TC5reUZcyp8n3KAOaDVz3ZXZB5tu1+8Ik4="
 class NordVPNAPI:
     def __init__(self, cache_file=CACHE_FILE):
         self.cache_file = cache_file

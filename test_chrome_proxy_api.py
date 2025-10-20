@@ -71,6 +71,19 @@ test_cases = [
                 ]
             }
         }
+    },
+    {
+        "name": "Case 6: Reuse available HAProxy (not in profiles list)",
+        "data": {
+            "proxy_check": "socks5://server:7891:fr42.nordvpn.com:",
+            "data": {
+                "count": 2,
+                "profiles": [
+                    {"id": 1, "name": "Profile 1", "proxy": "127.0.0.1:7892:us10.nordvpn.com"},
+                    {"id": 2, "name": "Profile 2", "proxy": "127.0.0.1:7893:jp10.nordvpn.com"}
+                ]
+            }
+        }
     }
 ]
 
@@ -123,9 +136,10 @@ if __name__ == '__main__':
         success = test_api(test_case)
         results.append((test_case['name'], success))
         
-        # Wait for user input before next test
+        # Wait a moment before next test
         if i < len(test_cases):
-            input("\nPress Enter to continue to next test...")
+            import time
+            time.sleep(1)
     
     # Summary
     print(f"\n\n{'='*80}")

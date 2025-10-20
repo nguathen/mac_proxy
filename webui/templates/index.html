@@ -585,7 +585,17 @@
             if (!confirm(`Are you sure you want to ${action} all wireproxy instances?`)) return;
             
             try {
-                const response = await fetch(`/api/wireproxy/${action}`, { method: 'POST' });
+                const response = await fetch(`/api/wireproxy/${action}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -595,6 +605,7 @@
                     alert(`Error: ${data.error}`);
                 }
             } catch (error) {
+                console.error('Wireproxy control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
@@ -603,7 +614,17 @@
             if (!confirm(`Are you sure you want to ${action} Wireproxy ${instance}?`)) return;
             
             try {
-                const response = await fetch(`/api/wireproxy/${instance}/${action}`, { method: 'POST' });
+                const response = await fetch(`/api/wireproxy/${instance}/${action}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -613,6 +634,7 @@
                     alert(`Error: ${data.error}`);
                 }
             } catch (error) {
+                console.error('Wireproxy instance control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
