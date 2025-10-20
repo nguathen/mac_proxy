@@ -563,6 +563,7 @@
                             </span>
                         </div>
                         <div class="service-info">Port: ${hp.port}</div>
+                        ${hp.wireproxy_port ? `<div class="service-info">Wireproxy: ${hp.wireproxy_port}</div>` : ''}
                         <div class="service-info">Status: ${hp.running ? '✅ Running' : '❌ Stopped'}</div>
                         ${hp.pid ? `<div class="service-info">PID: ${hp.pid}</div>` : ''}
                         ${hp.running ? `<a href="${hp.stats_url}" target="_blank" class="stats-link">📊 View Stats</a>` : ''}
