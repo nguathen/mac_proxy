@@ -165,7 +165,6 @@ def api_status():
     status = {
         'wireproxy': [],
         'haproxy': [],
-        'https_proxy': [],
         'timestamp': datetime.now().isoformat()
     }
     
@@ -303,34 +302,6 @@ def api_status():
             'stats_url': f'http://127.0.0.1:{stats_port}/haproxy?stats'
         })
     
-    # Check HTTPS Proxy
-    for i, port in enumerate(['8181', '8182'], 1):
-        pid_file = os.path.join(LOG_DIR, f'https_proxy_{port}.pid')
-        running = False
-        pid = None
-        
-        if os.path.exists(pid_file):
-            try:
-                with open(pid_file) as f:
-                    pid = int(f.read().strip())
-                    os.kill(pid, 0)
-                    running = True
-            except (OSError, ValueError):
-                pass
-        
-        # Test connection
-        connection_ok = False
-        if running:
-            result = run_command(f'curl -s --max-time 2 -x http://127.0.0.1:{port} https://api.ipify.org')
-            connection_ok = result['success'] and result['stdout'].strip()
-        
-        status['https_proxy'].append({
-            'name': f'HTTPS Proxy {i}',
-            'port': port,
-            'running': running,
-            'pid': pid,
-            'connection': connection_ok
-        })
     
     return jsonify(status)
 
@@ -974,11 +945,11 @@ def api_wireproxy_delete(instance):
 def api_haproxy_action(action):
     """Điều khiển HAProxy (start/stop/restart)"""
     if action == 'start':
-        result = run_command('bash start_all.sh')
+        result = run_command('bash start_haproxy_adaptive.sh')
     elif action == 'stop':
-        result = run_command('bash stop_all.sh')
+        result = run_command('bash stop_haproxy_only.sh')
     elif action == 'restart':
-        result = run_command('bash stop_all.sh && sleep 2 && bash start_all.sh')
+        result = run_command('bash stop_haproxy_only.sh && sleep 2 && bash start_haproxy_adaptive.sh')
     else:
         return jsonify({'success': False, 'error': 'Invalid action'}), 400
     
@@ -988,19 +959,6 @@ def api_haproxy_action(action):
         'error': result['stderr']
     })
 
-@app.route('/api/manage_https_proxy/<action>', methods=['POST'])
-def api_https_proxy_action(action):
-    """Điều khiển HTTPS Proxy (start/stop/restart)"""
-    if action not in ['start', 'stop', 'restart']:
-        return jsonify({'success': False, 'error': 'Invalid action'}), 400
-    
-    result = run_command(f'bash manage_https_proxy.sh {action}')
-    
-    return jsonify({
-        'success': result['success'],
-        'output': result['stdout'],
-        'error': result['stderr']
-    })
 
 @app.route('/api/logs/<service>')
 def api_get_logs(service):
@@ -1047,8 +1005,6 @@ def api_get_logs(service):
             port = port_map.get(instance_num, f'789{instance_num}')
             log_file = f'haproxy_health_{port}.log'
     # Check for HTTPS proxy logs
-    elif service.startswith('https_proxy_'):
-        log_file = f'{service}.log'
     
     if not log_file:
         return jsonify({'success': False, 'error': 'Invalid service'}), 400
@@ -1373,158 +1329,6 @@ def api_protonvpn_best_server():
             'error': str(e)
         }), 500
 
-@app.route('/api/protonvpn/apply/https/<int:instance>', methods=['POST'])
-def api_protonvpn_apply_https_proxy(instance):
-    """Áp dụng ProtonVPN server vào HTTPS Proxy instance"""
-    try:
-        if not protonvpn_api:
-            return jsonify({'success': False, 'error': 'ProtonVPN API not configured'}), 400
-        
-        # Validate instance (HTTPS proxy typically has 1-2 instances, but we check dynamically)
-        # For now, we support instances 1 and 2 for HTTPS proxy
-        if instance not in [1, 2]:
-            return jsonify({'success': False, 'error': 'Invalid instance. HTTPS Proxy supports instances 1-2'}), 400
-        
-        data = request.json
-        server_name = data.get('server_name')
-        
-        if not server_name:
-            return jsonify({'success': False, 'error': 'No server_name provided'}), 400
-        
-        # Get server info
-        server = protonvpn_api.get_server_by_name(server_name)
-        if not server:
-            return jsonify({'success': False, 'error': 'Server not found'}), 404
-        
-        # Get proxy credentials from API
-        try:
-            creds_response = requests.get('http://localhost:5267/mmo/getpassproxy', timeout=5)
-            if creds_response.status_code == 200:
-                try:
-                    creds_data = creds_response.json()
-                    proxy_username = creds_data.get('username', '')
-                    proxy_password = creds_data.get('password', '')
-                    
-                    if not proxy_username or not proxy_password:
-                        return jsonify({
-                            'success': False,
-                            'error': 'API returned empty username or password'
-                        }), 500
-                except ValueError:
-                    # API trả về plain text: username:password
-                    response_text = creds_response.text.strip()
-                    if ':' in response_text:
-                        parts = response_text.split(':', 1)
-                        proxy_username = parts[0]
-                        proxy_password = parts[1]
-                    else:
-                        return jsonify({
-                            'success': False,
-                            'error': f'Invalid credentials format: {response_text[:100]}'
-                        }), 500
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': f'Failed to get credentials: HTTP {creds_response.status_code}'
-                }), 500
-        except requests.exceptions.RequestException as e:
-            return jsonify({
-                'success': False,
-                'error': f'Cannot connect to credentials API: {str(e)}'
-            }), 500
-        
-        # Get domain from physical servers
-        servers_list = server.get('servers', [])
-        if not servers_list:
-            return jsonify({
-                'success': False,
-                'error': f"Server {server.get('name')} has no physical servers data"
-            }), 404
-        
-        # Get domain and label from first physical server
-        first_server = servers_list[0]
-        server_domain = first_server.get('domain')
-        if not server_domain:
-            return jsonify({
-                'success': False,
-                'error': 'Server domain not found'
-            }), 404
-        
-        # Get label for port calculation
-        label_str = first_server.get('label')
-        if label_str is None:
-            return jsonify({
-                'success': False,
-                'error': 'Server label not found'
-            }), 404
-        
-        try:
-            label = int(label_str)
-        except (ValueError, TypeError):
-            return jsonify({
-                'success': False,
-                'error': f'Invalid label: {label_str}'
-            }), 404
-        
-        proxy_port = 4443 + label  # Calculate port: 4443 + label
-        
-        # Configure HTTPS proxy (Python wrapper)
-        https_port = 8181 if instance == 1 else 8182
-        pid_file = os.path.join(LOG_DIR, f'https_proxy_{https_port}.pid')
-        
-        # Stop if running
-        if os.path.exists(pid_file):
-            try:
-                with open(pid_file) as f:
-                    pid = int(f.read().strip())
-                os.kill(pid, 15)
-                os.remove(pid_file)
-            except (OSError, ValueError):
-                pass
-        
-        import time
-        time.sleep(1)
-        
-        # Kill any process on the port
-        run_command(f'lsof -ti :{https_port} | xargs kill -9 2>/dev/null || true')
-        time.sleep(1)
-        
-        # Start Python proxy wrapper with DOMAIN
-        stdout_log = os.path.join(LOG_DIR, f'https_proxy_{https_port}_stdout.log')
-        proxy_wrapper = os.path.join(BASE_DIR, 'https_proxy_wrapper.py')
-        
-        cmd = f'nohup python3 {proxy_wrapper} --port {https_port} --upstream-host {server_domain} --upstream-port {proxy_port} --upstream-user "{proxy_username}" --upstream-pass "{proxy_password}" > {stdout_log} 2>&1 & echo $!'
-        result = run_command(cmd)
-        
-        if result['success']:
-            pid = result['stdout'].strip()
-            with open(pid_file, 'w') as f:
-                f.write(pid)
-            
-            name = server.get('name', 'Unknown')
-            return jsonify({
-                'success': True,
-                'message': f'Applied ProtonVPN {name} to HTTPS Proxy {instance}',
-                'server': server,
-                'proxy_config': {
-                    'host': server_domain,
-                    'port': proxy_port,
-                    'local_port': https_port,
-                    'username': proxy_username[:20] + '...'
-                },
-                'pid': pid
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': result['stderr']
-            }), 500
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
 
 @app.route('/api/protonvpn/apply/<int:instance>', methods=['POST'])
 def api_protonvpn_apply_server(instance):
@@ -1667,11 +1471,11 @@ def api_chrome_proxy_check():
         profiles_data = data.get('data', {})
         profiles = profiles_data.get('profiles', [])
         
-        # Parse proxy_check: "socks5://server:PORT:SERVER_NAME:"
+        # Parse proxy_check: "socks5://HOST:PORT:SERVER_NAME:"
         if not proxy_check or not proxy_check.startswith('socks5://'):
             return jsonify({
                 'success': False,
-                'error': 'Invalid proxy_check format. Expected: socks5://server:PORT:SERVER_NAME:'
+                'error': 'Invalid proxy_check format. Expected: socks5://HOST:PORT:SERVER_NAME:'
             }), 400
         
         # Extract components from proxy_check
@@ -1679,9 +1483,10 @@ def api_chrome_proxy_check():
         if len(proxy_parts) < 3:
             return jsonify({
                 'success': False,
-                'error': 'Invalid proxy_check format. Expected: socks5://server:PORT:SERVER_NAME:'
+                'error': 'Invalid proxy_check format. Expected: socks5://HOST:PORT:SERVER_NAME:'
             }), 400
         
+        client_host = proxy_parts[0]  # Extract host from proxy_check
         check_port = proxy_parts[1]
         check_server = proxy_parts[2]
         
@@ -1690,6 +1495,10 @@ def api_chrome_proxy_check():
             vpn_provider = 'nordvpn'
         elif 'protonvpn' in check_server.lower():
             vpn_provider = 'protonvpn'
+        elif len(check_server) == 2:
+            # For 2-character server names (country codes), random select VPN provider
+            # This will be handled in fallback logic
+            vpn_provider = 'nordvpn'  # Default provider for 2-char server names
         else:
             return jsonify({
                 'success': False,
@@ -1721,29 +1530,16 @@ def api_chrome_proxy_check():
         
         # Case 1: Exact match found
         if exact_match_found:
-            return jsonify({
-                'success': True,
-                'message': 'Proxy already in use by another profile',
-                'proxy_check': f'socks5://127.0.0.1:{check_port}:{check_server}:',
-                'data': profiles_data,
-                'action': 'use_existing'
-            })
+            return f'socks5://{client_host}:{check_port}:{check_server}:1'
         
         # Case 2: Port in use with different server - try to reuse available HAProxy first
         if port_in_use_by_other_server:
             # First, try to find an available HAProxy that's not in the profiles list
             available_haproxy = _find_available_haproxy(profiles, check_server, vpn_provider)
             if available_haproxy:
-                return jsonify({
-                    'success': True,
-                    'message': f'Reused available HAProxy on port {available_haproxy["port"]} with server {check_server}',
-                    'proxy_check': f'socks5://127.0.0.1:{available_haproxy["port"]}:{check_server}:',
-                    'data': profiles_data,
-                    'action': 'reused_available',
-                    'port': available_haproxy["port"],
-                    'server': check_server,
-                    'old_server': available_haproxy.get('old_server')
-                })
+                # Use the actual server name from available HAProxy (in case of fallback)
+                actual_server = available_haproxy.get('server', check_server)
+                return f'socks5://{client_host}:{available_haproxy["port"]}:{actual_server}:'
             
             # If no available HAProxy found, create new one
             # Find next available port by checking actual HAProxy configs
@@ -1791,15 +1587,9 @@ def api_chrome_proxy_check():
                     'error': result['error']
                 }), 500
             
-            return jsonify({
-                'success': True,
-                'message': f'Created new HAProxy on port {new_port} with server {check_server}',
-                'proxy_check': f'socks5://127.0.0.1:{new_port}:{check_server}:',
-                'data': profiles_data,
-                'action': 'created_new',
-                'port': new_port,
-                'server': check_server
-            })
+            # Use the actual server name from result (in case of fallback)
+            actual_server = result.get('server', check_server)
+            return f'socks5://{client_host}:{new_port}:{actual_server}:'
         
         # Case 3: Port not in use - check if HAProxy exists and matches server
         haproxy_config = os.path.join(BASE_DIR, 'config', f'haproxy_{check_port}.cfg')
@@ -1809,32 +1599,35 @@ def api_chrome_proxy_check():
             current_server = _get_server_from_haproxy_config(haproxy_config)
             
             if current_server and current_server != check_server:
-                # Server mismatch - reconfigure
-                result = _reconfigure_haproxy_with_server(check_port, check_server, vpn_provider)
-                if not result['success']:
-                    return jsonify({
-                        'success': False,
-                        'error': result['error']
-                    }), 500
-                
-                return jsonify({
-                    'success': True,
-                    'message': f'Reconfigured HAProxy port {check_port} with server {check_server}',
-                    'proxy_check': f'socks5://127.0.0.1:{check_port}:{check_server}:',
-                    'data': profiles_data,
-                    'action': 'reconfigured',
-                    'old_server': current_server,
-                    'new_server': check_server
-                })
+                # Server mismatch - only reconfigure if there are active profiles using this port
+                # If no profiles are using this port (count=0, profiles=[]), just return the current server
+                if len(profiles) == 0:
+                    # No active profiles - reconfigure existing port to match requested server
+                    result = _reconfigure_haproxy_with_server(check_port, check_server, vpn_provider)
+                    if not result['success']:
+                        return jsonify({
+                            'success': False,
+                            'error': result['error']
+                        }), 500
+                    
+                    # Use the actual server name from result (in case of fallback)
+                    actual_server = result.get('server', check_server)
+                    return f'socks5://{client_host}:{check_port}:{actual_server}:'
+                else:
+                    # Active profiles exist - reconfigure to match requested server
+                    result = _reconfigure_haproxy_with_server(check_port, check_server, vpn_provider)
+                    if not result['success']:
+                        return jsonify({
+                            'success': False,
+                            'error': result['error']
+                        }), 500
+                    
+                    # Use the actual server name from result (in case of fallback)
+                    actual_server = result.get('server', check_server)
+                    return f'socks5://{client_host}:{check_port}:{actual_server}:'
             elif current_server == check_server:
                 # Server matches - just return
-                return jsonify({
-                    'success': True,
-                    'message': 'HAProxy already configured correctly',
-                    'proxy_check': f'socks5://127.0.0.1:{check_port}:{check_server}:',
-                    'data': profiles_data,
-                    'action': 'already_configured'
-                })
+                return f'socks5://{client_host}:{check_port}:{check_server}:'
         
         # HAProxy doesn't exist - create new
         result = _create_haproxy_with_server(check_port, check_server, vpn_provider)
@@ -1844,15 +1637,9 @@ def api_chrome_proxy_check():
                 'error': result['error']
             }), 500
         
-        return jsonify({
-            'success': True,
-            'message': f'Created new HAProxy on port {check_port} with server {check_server}',
-            'proxy_check': f'socks5://127.0.0.1:{check_port}:{check_server}:',
-            'data': profiles_data,
-            'action': 'created_new',
-            'port': check_port,
-            'server': check_server
-        })
+        # Use the actual server name from result (in case of fallback)
+        actual_server = result.get('server', check_server)
+        return f'socks5://{client_host}:{check_port}:{actual_server}:'
         
     except Exception as e:
         return jsonify({
@@ -2088,6 +1875,8 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
         # If servername is exactly 2 characters, that's the country
         if len(server_name) == 2:
             country_code = server_name.upper()
+            # For 2-character server names, we'll random select VPN provider
+            # and find server by country code
         else:
             # Determine VPN provider from server name
             if 'nordvpn' in server_name.lower():
@@ -2165,13 +1954,20 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                 'SM': 'SM',  # San Marino
                 'VA': 'VA',  # Vatican City
                 'AD': 'AD',  # Andorra
+                'VN': 'VN',  # Vietnam -> Vietnam (keep original)
             }
             
             # Map country code if needed
             mapped_country = country_mappings.get(country_code, country_code)
             
-            # Randomize order of VPN providers
-            random.shuffle(vpn_providers)
+            # For 2-character server names, random select VPN provider
+            if len(server_name) == 2:
+                # Random select VPN provider for 2-character server names
+                vpn_providers = ['nordvpn', 'protonvpn']
+                random.shuffle(vpn_providers)
+            else:
+                # Randomize order of VPN providers
+                random.shuffle(vpn_providers)
             
             for vpn_provider in vpn_providers:
                 try:
@@ -2187,32 +1983,69 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                     # Try original country code first, then mapped
                     for test_country in [country_code, mapped_country]:
                         if test_country == country_code and test_country == mapped_country:
-                            continue  # Skip duplicate
+                            # Same country, only process once
+                            pass
                             
                         # Get servers by country
                         servers = api.get_servers_by_country(test_country)
                         if servers:
-                            # Random select a server
-                            selected_server = random.choice(servers)
-                            server_name = selected_server['name']
-                            
-                            # Find available port for fallback
-                            fallback_port = _find_available_port_for_fallback(port)
-                            if fallback_port:
-                                # Create HAProxy with the selected server (avoid recursion)
-                                result = _create_haproxy_with_server_direct(fallback_port, server_name, vpn_provider)
-                                if result['success']:
-                                    result['fallback_info'] = {
-                                        'original_server': server_name,
-                                        'country_code': test_country,
-                                        'vpn_provider': vpn_provider,
-                                        'reason': 'country_match',
-                                        'fallback_port': fallback_port
-                                    }
-                                    return result
+                            # Try multiple servers to find one that works
+                            max_attempts = min(3, len(servers))  # Try up to 3 servers
+                            for attempt in range(max_attempts):
+                                # Random select a server
+                                selected_server = random.choice(servers)
+                                server_name = selected_server['name']
+                                
+                                # Get domain name instead of display name
+                                if 'domain' in selected_server:
+                                    server_domain = selected_server['domain']
+                                elif 'hostname' in selected_server:
+                                    server_domain = selected_server['hostname']
                                 else:
-                                    # If port conflict, try next port
-                                    continue
+                                    # Fallback to name if no domain field
+                                    server_domain = server_name
+                                
+                                # Find available port for fallback
+                                fallback_port = _find_available_port_for_fallback(port)
+                                if fallback_port:
+                                    # Create HAProxy with the selected server (avoid recursion)
+                                    result = _create_haproxy_with_server_direct(fallback_port, server_domain, vpn_provider)
+                                    if result['success']:
+                                        # Test if the created HAProxy actually works
+                                        import time
+                                        time.sleep(5)  # Wait longer for HAProxy to start
+                                        
+                                        # Quick connectivity test - try multiple times
+                                        test_success = False
+                                        for test_attempt in range(3):
+                                            test_result = run_command(f'curl -s --connect-timeout 5 --socks5 127.0.0.1:{fallback_port} http://httpbin.org/ip')
+                                            if test_result['success'] and 'origin' in test_result['stdout']:
+                                                test_success = True
+                                                break
+                                            time.sleep(2)  # Wait between tests
+                                        
+                                        if test_success:
+                                            result['fallback_info'] = {
+                                                'original_server': server_domain,
+                                                'country_code': test_country,
+                                                'vpn_provider': vpn_provider,
+                                                'reason': 'country_match',
+                                                'fallback_port': fallback_port
+                                            }
+                                            return result
+                                        else:
+                                            # Server doesn't work, clean up and try next
+                                            try:
+                                                # Stop HAProxy and Wireproxy
+                                                run_command(f'lsof -ti :{fallback_port} | xargs -r kill -9 2>/dev/null || true')
+                                                wireproxy_port = 18181 + (fallback_port - 7891)
+                                                run_command(f'lsof -ti :{wireproxy_port} | xargs -r kill -9 2>/dev/null || true')
+                                            except Exception:
+                                                pass
+                                            continue
+                                    else:
+                                        # If creation failed, try next port
+                                        continue
                             else:
                                 # No available port, try next country
                                 continue
@@ -2242,14 +2075,23 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                     selected_server = random.choice(servers)
                     server_name = selected_server['name']
                     
+                    # Get domain name instead of display name
+                    if 'domain' in selected_server:
+                        server_domain = selected_server['domain']
+                    elif 'hostname' in selected_server:
+                        server_domain = selected_server['hostname']
+                    else:
+                        # Fallback to name if no domain field
+                        server_domain = server_name
+                    
                     # Find available port for fallback
                     fallback_port = _find_available_port_for_fallback(port)
                     if fallback_port:
                         # Create HAProxy with the selected server (avoid recursion)
-                        result = _create_haproxy_with_server_direct(fallback_port, server_name, vpn_provider)
+                        result = _create_haproxy_with_server_direct(fallback_port, server_domain, vpn_provider)
                         if result['success']:
                             result['fallback_info'] = {
-                                'original_server': server_name,
+                                'original_server': server_domain,
                                 'country_code': country_code,
                                 'vpn_provider': vpn_provider,
                                 'reason': 'random_fallback',
@@ -2321,12 +2163,24 @@ def _create_haproxy_with_server(port, server_name, vpn_provider):
         # Get server
         server = api.get_server_by_name(server_name)
         if not server:
-            # Server not found - try fallback logic
-            fallback_result = _handle_server_not_found(server_name, vpn_provider, port)
-            if fallback_result['success']:
-                return fallback_result
+            # If server name is 2 characters (country code), try to find by country
+            if len(server_name) == 2:
+                servers = api.get_servers_by_country(server_name.upper())
+                if servers:
+                    # Use the first available server from that country
+                    server = servers[0]
+                    # Update server_name to the actual server name
+                    server_name = server['name']
             else:
-                return {'success': False, 'error': f'Server {server_name} not found and fallback failed: {fallback_result["error"]}'}
+                # Server not found - try fallback logic
+                fallback_result = _handle_server_not_found(server_name, vpn_provider, port)
+                if fallback_result['success']:
+                    return fallback_result
+                else:
+                    return {'success': False, 'error': f'Server {server_name} not found and fallback failed: {fallback_result["error"]}'}
+        
+        if not server:
+            return {'success': False, 'error': f'Server {server_name} not found'}
         
         # Continue with implementation
         return _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, private_key)
@@ -2421,7 +2275,7 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
                 except Exception:
                     pid_ok = False
                 # check port listening
-                port_check = run_command(f'lsof -tiTCP:LISTEN -i :{wireproxy_port}')
+                port_check = run_command(f'lsof -ti :{wireproxy_port}')
                 port_ok = bool(port_check['success'] and port_check['stdout'].strip())
                 if pid_ok or port_ok:
                     return {'ok': True, 'pid': pid_str}
@@ -2594,16 +2448,37 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
         
         # Stop and reconfigure wireproxy if found
         if wireproxy_port and wireproxy_config_path:
-            # Stop wireproxy
+            # CRITICAL: Force kill ALL processes using wireproxy port to ensure clean restart
             wireproxy_pid_file = os.path.join(LOG_DIR, f'wireproxy_{wireproxy_port}.pid')
+            
+            # Kill by PID file first
             if os.path.exists(wireproxy_pid_file):
                 try:
                     with open(wireproxy_pid_file, 'r') as f:
                         pid = int(f.read().strip())
-                    os.kill(pid, 15)
+                    os.kill(pid, 9)  # SIGKILL for immediate termination
                     os.remove(wireproxy_pid_file)
                 except Exception:
                     pass
+            
+            # Force kill any process still holding the port
+            import time
+            time.sleep(0.5)  # Give process time to release port
+            result = run_command(f'lsof -ti :{wireproxy_port}')
+            if result['success'] and result['stdout'].strip():
+                pids = result['stdout'].strip().split('\n')
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), 9)
+                    except Exception:
+                        pass
+            
+            # Wait for port to be released
+            for _ in range(10):  # Wait up to 5 seconds
+                time.sleep(0.5)
+                result = run_command(f'lsof -ti :{wireproxy_port}')
+                if not (result['success'] and result['stdout'].strip()):
+                    break
             
             # Update wireproxy config with new server
             if vpn_provider == 'nordvpn':
@@ -2621,12 +2496,19 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
             
             server = api.get_server_by_name(server_name)
             if not server:
-                # Server not found - try fallback logic
-                fallback_result = _handle_server_not_found(server_name, vpn_provider, port)
-                if fallback_result['success']:
-                    return fallback_result
-                else:
-                    return {'success': False, 'error': f'Server {server_name} not found and fallback failed: {fallback_result["error"]}'}
+                # If server name is 2 characters (country code), try to find by country
+                if len(server_name) == 2:
+                    servers = api.get_servers_by_country(server_name.upper())
+                    if servers:
+                        # Use the first available server from that country
+                        server = servers[0]
+                        # Update server_name to the actual server name
+                        server_name = server['name']
+                
+                if not server:
+                    # CRITICAL: For reconfigure, we MUST NOT fallback to create new port
+                    # Instead, return error to force proper handling
+                    return {'success': False, 'error': f'Server {server_name} not found. Cannot reconfigure without valid server.'}
             
             bind_address = f'127.0.0.1:{wireproxy_port}'
             wireproxy_config = api.generate_wireguard_config(
@@ -2654,28 +2536,50 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                 except Exception:
                     pass
 
-            # Verify process/port becomes healthy
-            import time
-            for _ in range(40):  # ~20s max
-                time.sleep(0.5)
-                try:
-                    os.kill(int(pid_str), 0)
-                    pid_ok = True
-                except Exception:
-                    pid_ok = False
-                port_check = run_command(f'lsof -tiTCP:LISTEN -i :{wireproxy_port}')
-                port_ok = bool(port_check['success'] and port_check['stdout'].strip())
-                if pid_ok or port_ok:
-                    return {'ok': True, 'pid': pid_str}
-            return {'ok': False, 'error': 'wireproxy not listening'}
+                # Verify process/port becomes healthy
+                import time
+                for _ in range(40):  # ~20s max
+                    time.sleep(0.5)
+                    try:
+                        os.kill(int(pid_str), 0)
+                        pid_ok = True
+                    except Exception:
+                        pid_ok = False
+                    port_check = run_command(f'lsof -ti :{wireproxy_port} -sTCP:LISTEN')
+                    port_ok = bool(port_check['success'] and port_check['stdout'].strip())
+                    if pid_ok and port_ok:
+                        return {'ok': True, 'pid': pid_str}
+                return {'ok': False, 'error': 'wireproxy not listening'}
 
+            # CRITICAL: Must restart wireproxy successfully before proceeding
             verify_res = _restart_and_verify_wireproxy()
             if not verify_res['ok']:
+                # Try one more time
                 verify_res = _restart_and_verify_wireproxy()
             if not verify_res['ok']:
-                return {'success': False, 'error': f'Failed to restart wireproxy {wireproxy_port}: {verify_res.get("error", "unknown error") }'}
+                # If wireproxy fails, we MUST restore the original server to avoid leaving port in broken state
+                print(f"WARNING: Failed to restart wireproxy {wireproxy_port}, restoring original server")
+                # Try to restore original server configuration
+                try:
+                    # Get original server from backup or recreate with original server
+                    original_server = _get_server_from_haproxy_config(haproxy_config_path)
+                    if original_server:
+                        # Restore original wireproxy config
+                        original_wireproxy_config = api.generate_wireguard_config(
+                            server=api.get_server_by_name(original_server),
+                            private_key=private_key,
+                            bind_address=f'127.0.0.1:{wireproxy_port}'
+                        )
+                        save_wireproxy_config(wireproxy_config_path, original_wireproxy_config)
+                        # Try to restart with original config
+                        verify_res = _restart_and_verify_wireproxy()
+                        if verify_res['ok']:
+                            return {'success': False, 'error': f'Failed to reconfigure to {server_name}, restored original server {original_server}'}
+                except Exception:
+                    pass
+                return {'success': False, 'error': f'Failed to restart wireproxy {wireproxy_port}: {verify_res.get("error", "unknown error")}. Port may be in broken state.'}
         
-        # Restart HAProxy
+        # CRITICAL: Restart HAProxy and verify it's working
         try:
             haproxy_bin = subprocess.check_output(['which', 'haproxy'], text=True).strip()
         except Exception:
@@ -2686,6 +2590,13 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
         
         if not result['success']:
             return {'success': False, 'error': f'Failed to start HAProxy: {result["stderr"]}'}
+        
+        # Verify HAProxy is actually running and listening on the port
+        import time
+        time.sleep(2)  # Give HAProxy time to start
+        port_check = run_command(f'lsof -ti :{port}')
+        if not (port_check['success'] and port_check['stdout'].strip()):
+            return {'success': False, 'error': f'HAProxy started but not listening on port {port}'}
         
         # Restart health monitor
         if wireproxy_port:

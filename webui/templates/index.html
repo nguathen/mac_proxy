@@ -317,15 +317,6 @@
             </div>
             
             <!-- HTTPS Proxy Card -->
-            <div class="card">
-                <h2>🌐 HTTPS Proxy Services</h2>
-                <div id="https-proxy-status"></div>
-                <div class="btn-group">
-                    <button class="btn btn-success" onclick="controlHTTPSProxy('start')">Start All</button>
-                    <button class="btn btn-danger" onclick="controlHTTPSProxy('stop')">Stop All</button>
-                    <button class="btn btn-warning" onclick="controlHTTPSProxy('restart')">Restart All</button>
-                </div>
-            </div>
             
             <!-- HAProxy Card -->
             <div class="card">
@@ -404,9 +395,6 @@
             
             <div id="protonvpn-wireproxy-buttons" class="btn-group">
                 <!-- Wireproxy buttons will be generated dynamically -->
-            </div>
-            <div id="protonvpn-https-buttons" class="btn-group" style="margin-top: 10px;">
-                <!-- HTTPS Proxy buttons will be generated dynamically -->
             </div>
             <div class="btn-group" style="margin-top: 10px;">
                 <button class="btn btn-info" onclick="loadProtonVPNCountries()">🔄 Refresh</button>
@@ -497,7 +485,6 @@
                 
                 // Store current instances for VPN server selection
                 currentWireproxyInstances = data.wireproxy;
-                currentHttpsProxyInstances = data.https_proxy;
                 
                 // Update VPN server selection buttons
                 updateVPNButtons();
@@ -532,26 +519,6 @@
                 `}).join('');
                 document.getElementById('wireproxy-status').innerHTML = wireproxyHtml;
                 
-                // Update HTTPS Proxy status
-                const httpsProxyHtml = data.https_proxy.map(hp => `
-                    <div class="service-item">
-                        <div class="service-header">
-                            <span class="service-name">
-                                <span class="status-indicator ${hp.running ? 'status-running' : 'status-stopped'}"></span>
-                                ${hp.name}
-                            </span>
-                        </div>
-                        <div class="service-info">Port: ${hp.port}</div>
-                        <div class="service-info">Status: ${hp.running ? '✅ Running' : '❌ Stopped'}</div>
-                        ${hp.running ? `<div class="service-info">Connection: ${hp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
-                        ${hp.pid ? `<div class="service-info">PID: ${hp.pid}</div>` : ''}
-                        <div class="btn-group">
-                            <button class="btn btn-info" onclick="testHTTPSProxy('${hp.port}')">Test</button>
-                            <button class="btn btn-primary" onclick="viewLogs('https_proxy_${hp.port}')">Logs</button>
-                        </div>
-                    </div>
-                `).join('');
-                document.getElementById('https-proxy-status').innerHTML = httpsProxyHtml;
                 
                 // Update HAProxy status
                 const haproxyHtml = data.haproxy.map(hp => `
@@ -814,36 +781,7 @@
             }
         }
         
-        async function testHTTPSProxy(port) {
-            try {
-                const response = await fetch(`https://api.ipify.org`, {
-                    method: 'GET'
-                });
-                
-                // Simple test - just check if we can reach the endpoint
-                alert(`Testing HTTPS proxy on port ${port}...\n\nPlease use: curl -x http://127.0.0.1:${port} https://api.ipify.org`);
-            } catch (error) {
-                alert(`❌ Error: ${error.message}`);
-            }
-        }
         
-        async function controlHTTPSProxy(action) {
-            if (!confirm(`Are you sure you want to ${action} all HTTPS proxy instances?`)) return;
-            
-            try {
-                const response = await fetch(`/api/manage_https_proxy/${action}`, { method: 'POST' });
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert(`HTTPS Proxy ${action} successful!`);
-                    loadStatus();
-                } else {
-                    alert(`Error: ${data.error}`);
-                }
-            } catch (error) {
-                alert(`Error: ${error.message}`);
-            }
-        }
         
         // Update VPN server selection buttons dynamically
         function updateVPNButtons() {
@@ -861,12 +799,6 @@
             }).join('');
             document.getElementById('protonvpn-wireproxy-buttons').innerHTML = protonWireproxyButtonsHtml;
             
-            // Update ProtonVPN HTTPS Proxy buttons
-            const protonHttpsButtonsHtml = currentHttpsProxyInstances.map((hp, idx) => {
-                const instance = idx + 1;
-                return `<button class="btn btn-primary" onclick="applyProtonVPNServer(${instance}, 'https')">Apply to HTTPS Proxy ${instance} (${hp.port})</button>`;
-            }).join('');
-            document.getElementById('protonvpn-https-buttons').innerHTML = protonHttpsButtonsHtml;
         }
         
         // NordVPN Functions
@@ -1130,16 +1062,10 @@
             let confirmMsg = '';
             let apiUrl = '';
             
-            if (type === 'https') {
-                const httpsPort = instance === 1 ? 8181 : 8182;
-                confirmMsg = `Apply ProtonVPN server "${serverName}" to HTTPS Proxy ${instance} (port ${httpsPort})?\n\nThis will use domain-based connection.`;
-                apiUrl = `/api/protonvpn/apply/https/${instance}`;
-            } else {
-                // Get port from current wireproxy instances
-                const wireproxyPort = currentWireproxyInstances[instance - 1]?.port || '?';
-                confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy ${instance} (port ${wireproxyPort})?\n\nThis will create WireGuard tunnel.`;
-                apiUrl = `/api/protonvpn/apply/${instance}`;
-            }
+            // Get port from current wireproxy instances
+            const wireproxyPort = currentWireproxyInstances[instance - 1]?.port || '?';
+            confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy ${instance} (port ${wireproxyPort})?\n\nThis will create WireGuard tunnel.`;
+            apiUrl = `/api/protonvpn/apply/${instance}`;
             
             if (!confirm(confirmMsg)) {
                 return;

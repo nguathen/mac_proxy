@@ -43,7 +43,6 @@ Hệ thống proxy với HAProxy, Wiresock (WireGuard SOCKS5 client) và Cloudfl
 - ✅ **Latency-based routing**: Tự động chọn backend có latency thấp nhất
 - ✅ **Graceful degradation**: Fallback cascade từ WG → WARP
 - ✅ **NordVPN Integration**: Tích hợp NordVPN với 5000+ servers, chọn server theo quốc gia
-- ✅ **HTTPS Proxy**: Hỗ trợ HTTP/HTTPS proxy (port 8181, 8182) song song với SOCKS5
 
 ## 📋 Yêu cầu
 
@@ -186,9 +185,6 @@ Cấu hình ứng dụng của bạn để sử dụng:
 - **HAProxy 1:** `socks5://127.0.0.1:7891` hoặc `socks5://0.0.0.0:7891` (external)
 - **HAProxy 2:** `socks5://127.0.0.1:7892` hoặc `socks5://0.0.0.0:7892` (external)
 
-**HTTPS Proxy (3proxy):**
-- **HTTPS Proxy 1:** `http://127.0.0.1:8181` hoặc `http://0.0.0.0:8181` (external)
-- **HTTPS Proxy 2:** `http://127.0.0.1:8182` hoặc `http://0.0.0.0:8182` (external)
 
 ### Xem HAProxy Stats Dashboard
 
@@ -409,41 +405,10 @@ python3 nordvpn_cli.py apply 1 --server "Japan #720"
 
 👉 Xem chi tiết: [NORDVPN.md](NORDVPN.md) | [NORDVPN_QUICKSTART.md](NORDVPN_QUICKSTART.md)
 
-## 🌐 HTTPS Proxy
 
-Hệ thống hỗ trợ HTTP/HTTPS proxy sử dụng 3proxy, hoạt động song song với SOCKS5.
 
-### Quick Start
 
-```bash
-# Cài đặt 3proxy
-brew install 3proxy
 
-# Khởi động (tự động chạy khi start_all.sh)
-./manage_https_proxy.sh start
-
-# Test
-curl -x http://127.0.0.1:8181 https://api.ipify.org
-./test_https_proxy.sh
-```
-
-### Quản lý
-
-```bash
-# Khởi động
-./manage_https_proxy.sh start
-
-# Dừng
-./manage_https_proxy.sh stop
-
-# Khởi động lại
-./manage_https_proxy.sh restart
-
-# Kiểm tra trạng thái
-./manage_https_proxy.sh status
-```
-
-👉 Xem chi tiết: [HTTPS_PROXY.md](HTTPS_PROXY.md)
 
 ## 🛡️ Bảo mật
 

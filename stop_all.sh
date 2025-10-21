@@ -13,11 +13,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Dừng Web UI
 echo ""
-echo "🛑 Stopping Web UI..."
-if [ -f "stop_webui.sh" ]; then
-    chmod +x stop_webui.sh
-    ./stop_webui.sh
-fi
+#echo "🛑 Stopping Web UI..."
+#if [ -f "stop_webui.sh" ]; then
+#    chmod +x stop_webui.sh
+#    ./stop_webui.sh
+#fi
 
 # Dừng Wireproxy
 echo ""
@@ -27,13 +27,6 @@ if [ -f "manage_wireproxy.sh" ]; then
     ./manage_wireproxy.sh stop
 fi
 
-# Dừng HTTPS Proxy
-echo ""
-echo "🛑 Stopping HTTPS proxy instances..."
-if [ -f "manage_https_proxy.sh" ]; then
-    chmod +x manage_https_proxy.sh
-    ./manage_https_proxy.sh stop
-fi
 
 # Dừng health monitors
 echo ""
