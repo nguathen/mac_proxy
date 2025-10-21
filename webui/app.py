@@ -1497,8 +1497,8 @@ def api_chrome_proxy_check():
             vpn_provider = 'protonvpn'
         elif len(check_server) == 2:
             # For 2-character server names (country codes), random select VPN provider
-            # This will be handled in fallback logic
-            vpn_provider = 'nordvpn'  # Default provider for 2-char server names
+            import random
+            vpn_provider = random.choice(['nordvpn', 'protonvpn'])
         else:
             return jsonify({
                 'success': False,
@@ -1512,8 +1512,15 @@ def api_chrome_proxy_check():
         for profile in profiles:
             if profile.get('proxy'):
                 proxy_str = profile['proxy']
-                # Parse: "127.0.0.1:PORT:SERVER_NAME" or "127.0.0.1:PORT"
-                parts = proxy_str.split(':')
+                # Parse socks5://host:port:server format
+                if proxy_str.startswith('socks5://'):
+                    # Remove socks5:// prefix
+                    proxy_str = proxy_str[9:]
+                    parts = proxy_str.split(':')
+                else:
+                    # Parse: "127.0.0.1:PORT:SERVER_NAME" or "127.0.0.1:PORT"
+                    parts = proxy_str.split(':')
+                
                 if len(parts) >= 2:
                     profile_port = parts[1]
                     profile_server = parts[2] if len(parts) >= 3 else ''
@@ -1545,12 +1552,21 @@ def api_chrome_proxy_check():
             # Find next available port by checking actual HAProxy configs
             existing_ports = set()
             
-            # Check profiles first
+            # Check profiles first - parse socks5://host:port:server format
             for profile in profiles:
                 if profile.get('proxy'):
-                    parts = profile['proxy'].split(':')
-                    if len(parts) >= 2:
-                        existing_ports.add(int(parts[1]))
+                    proxy = profile['proxy']
+                    # Parse socks5://host:port:server format
+                    if proxy.startswith('socks5://'):
+                        # Remove socks5:// prefix
+                        proxy = proxy[9:]
+                        parts = proxy.split(':')
+                        if len(parts) >= 2:
+                            try:
+                                port = int(parts[1])
+                                existing_ports.add(port)
+                            except ValueError:
+                                pass
             
             # Check actual HAProxy config files
             import glob
@@ -1715,12 +1731,18 @@ def _find_available_haproxy(profiles, target_server, vpn_provider):
         profile_ports = set()
         for profile in profiles:
             if profile.get('proxy'):
-                parts = profile['proxy'].split(':')
-                if len(parts) >= 2:
-                    try:
-                        profile_ports.add(int(parts[1]))
-                    except ValueError:
-                        pass
+                proxy = profile['proxy']
+                # Parse socks5://host:port:server format
+                if proxy.startswith('socks5://'):
+                    # Remove socks5:// prefix
+                    proxy = proxy[9:]
+                    parts = proxy.split(':')
+                    if len(parts) >= 2:
+                        try:
+                            port = int(parts[1])
+                            profile_ports.add(port)
+                        except ValueError:
+                            pass
         
         # Find all existing HAProxy configs
         import glob
@@ -1793,6 +1815,7 @@ def _find_available_haproxy(profiles, target_server, vpn_provider):
             if result['success']:
                 return {
                     'port': port,
+                    'server': result.get('server', target_server),
                     'old_server': current_server,
                     'new_server': target_server
                 }
@@ -1890,13 +1913,18 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                     if match:
                         country_code = match.group(1).upper()
             elif 'protonvpn' in server_name.lower():
-                # ProtonVPN: node-am-01.protonvpn.net -> am (split by '-' and take [1])
+                # ProtonVPN: vn-01.protonvpn.net -> vn (split by '-' and take [0])
+                # Also handle: node-lu-06.protonvpn.net -> lu (split by '-' and take [1])
                 parts = server_name.split('.')
                 if parts:
                     first_part = parts[0]
                     dash_parts = first_part.split('-')
-                    if len(dash_parts) >= 2:
+                    if len(dash_parts) >= 2 and dash_parts[0] == 'node':
+                        # For node-lu-06.protonvpn.net, take the second part (lu)
                         country_code = dash_parts[1].upper()
+                    elif len(dash_parts) >= 1:
+                        # For vn-01.protonvpn.net, take the first part (vn)
+                        country_code = dash_parts[0].upper()
             else:
                 # Generic fallback: try to extract 2 letters from beginning
                 parts = server_name.split('.')
@@ -1960,11 +1988,36 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
             # Map country code if needed
             mapped_country = country_mappings.get(country_code, country_code)
             
-            # For 2-character server names, random select VPN provider
+            # For 2-character server names, try both providers but prioritize based on country availability
             if len(server_name) == 2:
-                # Random select VPN provider for 2-character server names
-                vpn_providers = ['nordvpn', 'protonvpn']
-                random.shuffle(vpn_providers)
+                # Check which providers have servers for this country
+                available_providers = []
+                
+                # Check NordVPN
+                try:
+                    nordvpn_servers = nordvpn_api.get_servers_by_country(mapped_country)
+                    if nordvpn_servers:
+                        available_providers.append('nordvpn')
+                except Exception:
+                    pass
+                
+                # Check ProtonVPN
+                try:
+                    if protonvpn_api:
+                        protonvpn_servers = protonvpn_api.get_servers_by_country(mapped_country)
+                        if protonvpn_servers:
+                            available_providers.append('protonvpn')
+                except Exception:
+                    pass
+                
+                # If no providers have servers for this country, fallback to random
+                if not available_providers:
+                    vpn_providers = ['nordvpn', 'protonvpn']
+                    random.shuffle(vpn_providers)
+                else:
+                    # Use available providers, shuffle for randomness
+                    vpn_providers = available_providers
+                    random.shuffle(vpn_providers)
             else:
                 # Randomize order of VPN providers
                 random.shuffle(vpn_providers)
@@ -2169,8 +2222,13 @@ def _create_haproxy_with_server(port, server_name, vpn_provider):
                 if servers:
                     # Use the first available server from that country
                     server = servers[0]
-                    # Update server_name to the actual server name
-                    server_name = server['name']
+                    # Update server_name to the correct format based on provider
+                    if vpn_provider == 'nordvpn':
+                        server_name = server['hostname']  # NordVPN: use hostname
+                    elif vpn_provider == 'protonvpn':
+                        server_name = server['domain']    # ProtonVPN: use domain
+                    else:
+                        server_name = server['name']      # Fallback: use name
             else:
                 # Server not found - try fallback logic
                 fallback_result = _handle_server_not_found(server_name, vpn_provider, port)
@@ -2502,13 +2560,126 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                     if servers:
                         # Use the first available server from that country
                         server = servers[0]
-                        # Update server_name to the actual server name
-                        server_name = server['name']
+                        # Update server_name to the correct format based on provider
+                        if vpn_provider == 'nordvpn':
+                            server_name = server['hostname']  # NordVPN: use hostname
+                        elif vpn_provider == 'protonvpn':
+                            server_name = server['domain']    # ProtonVPN: use domain
+                        else:
+                            server_name = server['name']      # Fallback: use name
                 
                 if not server:
-                    # CRITICAL: For reconfigure, we MUST NOT fallback to create new port
-                    # Instead, return error to force proper handling
-                    return {'success': False, 'error': f'Server {server_name} not found. Cannot reconfigure without valid server.'}
+                    # Server not found - try to extract country code and find alternative server
+                    country_code = None
+                    
+                    # Extract country code from server name based on provider
+                    print(f"DEBUG: Extracting country code from '{server_name}' for provider '{vpn_provider}'")
+                    
+                    if vpn_provider == 'nordvpn':
+                        # NordVPN: node-vn-02.protonvpn.net -> vn (first 2 characters before first number)
+                        parts = server_name.split('.')
+                        if parts:
+                            first_part = parts[0]
+                            import re
+                            match = re.match(r'^([a-zA-Z]{2})', first_part)
+                            if match:
+                                country_code = match.group(1).upper()
+                                print(f"DEBUG: NordVPN country code: {country_code}")
+                    elif vpn_provider == 'protonvpn':
+                        # ProtonVPN: vn-01.protonvpn.net -> vn (split by '-' and take [0])
+                        # Also handle: node-lu-06.protonvpn.net -> lu (split by '-' and take [1])
+                        parts = server_name.split('.')
+                        if parts:
+                            first_part = parts[0]
+                            dash_parts = first_part.split('-')
+                            print(f"DEBUG: ProtonVPN dash_parts: {dash_parts}")
+                            
+                            if len(dash_parts) >= 2 and dash_parts[0] == 'node':
+                                # For node-lu-06.protonvpn.net, take the second part (lu)
+                                country_code = dash_parts[1].upper()
+                                print(f"DEBUG: ProtonVPN node format country code: {country_code}")
+                            elif len(dash_parts) >= 1:
+                                # For vn-01.protonvpn.net, take the first part (vn)
+                                country_code = dash_parts[0].upper()
+                                print(f"DEBUG: ProtonVPN standard format country code: {country_code}")
+                    
+                    print(f"DEBUG: Final country code: {country_code}")
+                    
+                    if country_code:
+                        # Try to find alternative server from same country
+                        servers = api.get_servers_by_country(country_code)
+                        if servers:
+                            # Use random server from same country
+                            import random
+                            server = random.choice(servers)
+                            # Update server_name to the correct format based on provider
+                            if vpn_provider == 'nordvpn':
+                                server_name = server['hostname']  # NordVPN: use hostname
+                            elif vpn_provider == 'protonvpn':
+                                server_name = server['domain']    # ProtonVPN: use domain
+                            else:
+                                server_name = server['name']      # Fallback: use name
+                            
+                            # Debug logging
+                            print(f"DEBUG: Found {len(servers)} servers for country {country_code}")
+                            print(f"DEBUG: Selected server: {server_name}")
+                            print(f"DEBUG: Server domain: {server.get('domain', 'N/A')}")
+                            print(f"DEBUG: Server name: {server.get('name', 'N/A')}")
+                        else:
+                            print(f"DEBUG: No servers found for country {country_code}")
+                    
+                    if not server:
+                        # If still no server found, try random server from any country
+                        try:
+                            # Try to get all servers from the current provider
+                            all_servers = api.fetch_servers()
+                            if all_servers:
+                                import random
+                                server = random.choice(all_servers)
+                                # Update server_name to the correct format based on provider
+                                if vpn_provider == 'nordvpn':
+                                    server_name = server['hostname']  # NordVPN: use hostname
+                                elif vpn_provider == 'protonvpn':
+                                    server_name = server['domain']    # ProtonVPN: use domain
+                                else:
+                                    server_name = server['name']      # Fallback: use name
+                                
+                                # Debug logging
+                                print(f"DEBUG: Fallback to random server from {vpn_provider}")
+                                print(f"DEBUG: Selected random server: {server_name}")
+                                print(f"DEBUG: Server domain: {server.get('domain', 'N/A')}")
+                                print(f"DEBUG: Server country: {server.get('country_code', 'N/A')}")
+                        except Exception as e:
+                            print(f"DEBUG: Error in random fallback: {e}")
+                            pass
+                    
+                    if not server:
+                        # If still no server found, try the other VPN provider as last resort
+                        try:
+                            other_provider = 'protonvpn' if vpn_provider == 'nordvpn' else 'nordvpn'
+                            other_api = protonvpn_api if other_provider == 'protonvpn' else nordvpn_api
+                            
+                            if other_api:
+                                all_servers = other_api.fetch_servers()
+                                if all_servers:
+                                    import random
+                                    server = random.choice(all_servers)
+                                    # Update server_name to the correct format based on provider
+                                    if other_provider == 'nordvpn':
+                                        server_name = server['hostname']  # NordVPN: use hostname
+                                    elif other_provider == 'protonvpn':
+                                        server_name = server['domain']    # ProtonVPN: use domain
+                                    else:
+                                        server_name = server['name']      # Fallback: use name
+                                    
+                                    # Update vpn_provider to the one we actually used
+                                    vpn_provider = other_provider
+                        except Exception:
+                            pass
+                    
+                    if not server:
+                        # If still no server found, return error
+                        return {'success': False, 'error': f'Server {server_name} not found and no alternative server available'}
             
             bind_address = f'127.0.0.1:{wireproxy_port}'
             wireproxy_config = api.generate_wireguard_config(
