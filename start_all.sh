@@ -21,11 +21,19 @@ if ! command -v haproxy &> /dev/null; then
     exit 1
 fi
 
-# Khởi động Wireproxy
+# Khởi động Gost
 echo ""
-echo "🔐 Starting Wireproxy instances..."
-chmod +x manage_wireproxy.sh
-./manage_wireproxy.sh start
+echo "🔐 Starting Gost instances..."
+chmod +x manage_gost.sh
+
+# Cấu hình mặc định nếu chưa có
+echo "📋 Checking gost configurations..."
+if [ ! -f "logs/gost1.config" ]; then
+    echo "   Setting up default configuration for instance 1..."
+    ./manage_gost.sh config 1 protonvpn "node-uk-29.protonvpn.net"
+fi
+
+./manage_gost.sh start
 
 
 # Kiểm tra Cloudflare WARP

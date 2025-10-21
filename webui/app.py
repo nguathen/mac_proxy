@@ -18,6 +18,7 @@ import concurrent.futures
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nordvpn_api import NordVPNAPI
 from protonvpn_api import ProtonVPNAPI
+from proxy_api import proxy_api
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'haproxy-webui-secret-key-2025'
@@ -81,62 +82,61 @@ def run_command(cmd, cwd=BASE_DIR):
             'returncode': -1
         }
 
-def parse_wireproxy_config(config_path):
-    """Parse wireproxy config file"""
-    if not os.path.exists(config_path):
-        return None
-    
-    config = {
-        'interface': {},
-        'peer': {},
-        'socks5': {}
+def parse_gost_config(instance):
+    """Parse gost config for instance"""
+    # Gost instances configuration
+    gost_instances = {
+        1: "18181", 2: "18182", 3: "18183", 4: "18184",
+        5: "18185", 6: "18186", 7: "18187"
     }
     
-    try:
-        with open(config_path, 'r') as f:
-            current_section = None
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                
-                if line.startswith('[') and line.endswith(']'):
-                    current_section = line[1:-1].lower()
-                    continue
-                
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip()
-                    
-                    if current_section == 'interface':
-                        config['interface'][key] = value
-                    elif current_section == 'peer':
-                        config['peer'][key] = value
-                    elif current_section == 'socks5':
-                        config['socks5'][key] = value
-        
-        return config
-    except Exception as e:
+    if instance not in gost_instances:
         return None
+    
+    port = gost_instances[instance]
+    config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+    
+    # Default config
+    config = {
+        'instance': instance,
+        'port': port,
+        'proxy_url': '',
+        'provider': 'protonvpn',
+        'country': ''
+    }
+    
+    # Try to load from config file
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r') as f:
+                saved_config = json.load(f)
+                config.update(saved_config)
+        except Exception:
+            pass
+    
+    return config
 
-def save_wireproxy_config(config_path, config):
-    """Save wireproxy config file"""
+def save_gost_config(instance, config):
+    """Save gost config for instance"""
     try:
-        with open(config_path, 'w') as f:
-            f.write('[Interface]\n')
-            for key, value in config.get('interface', {}).items():
-                f.write(f'{key} = {value}\n')
-            
-            f.write('\n[Peer]\n')
-            for key, value in config.get('peer', {}).items():
-                f.write(f'{key} = {value}\n')
-            
-            f.write('\n[Socks5]\n')
-            for key, value in config.get('socks5', {}).items():
-                f.write(f'{key} = {value}\n')
+        provider = config.get('provider', 'protonvpn')
+        country = config.get('country', '')
         
-        return True
+        if not provider or not country:
+            return False
+        
+        # Sử dụng manage_gost.sh để cấu hình
+        result = run_command(f'bash manage_gost.sh config {instance} {provider} "{country}"')
+        
+        if result['success']:
+            # Cập nhật config object với thông tin mới
+            if provider == 'protonvpn':
+                config['proxy_url'] = proxy_api.get_protonvpn_proxy(country)
+            elif provider == 'nordvpn':
+                config['proxy_url'] = proxy_api.get_nordvpn_proxy(country)
+            return True
+        else:
+            return False
     except Exception as e:
         return False
 
@@ -163,40 +163,33 @@ def index():
 def api_status():
     """Lấy trạng thái tất cả services"""
     status = {
-        'wireproxy': [],
+        'gost': [],
         'haproxy': [],
         'timestamp': datetime.now().isoformat()
     }
     
-    # Check wireproxy - auto-discover all wg*.conf files
-    wireproxy_configs = []
+    # Check gost instances - include instances that have been created or are running
+    gost_instances = {}
+    for instance in range(1, 8):
+        port = f"1818{instance}"
+        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
+        
+        # Include instance if it has config file, pid file, or is running on port
+        # This ensures stopped instances with configs still appear
+        if (os.path.exists(config_file) or 
+            os.path.exists(pid_file) or 
+            run_command(f'lsof -ti :{port}')['success']):
+            gost_instances[instance] = port
     
-    # Scan for all wg*.conf files
-    import glob
-    for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-        # Extract port from config file
-        try:
-            with open(conf_file, 'r') as f:
-                for line in f:
-                    if 'BindAddress' in line:
-                        # Extract port from "BindAddress = 127.0.0.1:18181"
-                        port = line.split(':')[-1].strip()
-                        wireproxy_configs.append({
-                            'config': conf_file,
-                            'port': port
-                        })
-                        break
-        except Exception:
-            pass
-    
-    # Check status for each wireproxy in parallel to avoid blocking
-    def _probe_wireproxy(index_and_cfg):
-        i, wp_config = index_and_cfg
-        port = wp_config['port']
-        conf = wp_config['config']
-        pid_file = os.path.join(LOG_DIR, f'wireproxy_{port}.pid')
+    # Check status for each gost instance in parallel to avoid blocking
+    def _probe_gost(instance_port):
+        instance, port = instance_port
+        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
         running = False
         pid = None
+        proxy_url = ""
+        
         if os.path.exists(pid_file):
             try:
                 with open(pid_file) as f:
@@ -208,37 +201,45 @@ def api_status():
                     os.remove(pid_file)
                 except Exception:
                     pass
+        
         if not running:
             result = run_command(f'lsof -ti :{port}')
             if result['success'] and result['stdout'].strip():
                 try:
                     pid = int(result['stdout'].strip().split('\n')[0])
                     check = run_command(f'ps -p {pid} -o command=')
-                    if check['success'] and 'wireproxy' in check['stdout']:
+                    if check['success'] and 'gost' in check['stdout']:
                         running = True
                         try:
                             with open(pid_file, 'w') as f:
                                 f.write(str(pid))
                         except Exception:
                             pass
+                        # Extract proxy URL from command
+                        import re
+                        match = re.search(r'-F\s+([^\s]+)', check['stdout'])
+                        if match:
+                            proxy_url = match.group(1)
                 except (ValueError, IndexError):
                     pass
+        
         connection_ok = False
         if running:
             result = run_command(f'curl -s --max-time 2 -x socks5h://127.0.0.1:{port} https://api.ipify.org')
             connection_ok = bool(result['success'] and result['stdout'].strip())
+        
         return {
-            'name': f'Wireproxy {i}',
+            'name': f'Gost {instance}',
             'port': port,
             'running': running,
             'pid': pid,
             'connection': connection_ok,
-            'config': conf
+            'proxy_url': proxy_url
         }
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(wireproxy_configs)))) as executor:
-        results = list(executor.map(_probe_wireproxy, enumerate(wireproxy_configs, 1)))
-    status['wireproxy'].extend(results)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(gost_instances)))) as executor:
+        results = list(executor.map(_probe_gost, gost_instances.items()))
+    status['gost'].extend(results)
     
     # Check HAProxy - scan all config files and running processes
     haproxy_ports = set()
@@ -305,90 +306,50 @@ def api_status():
     
     return jsonify(status)
 
-@app.route('/api/wireproxy/config/<int:instance>')
-def api_get_wireproxy_config(instance):
-    """Lấy config wireproxy"""
-    # Get all wireproxy configs
-    import glob
-    wireproxy_configs = []
-    for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-        try:
-            with open(conf_file, 'r') as f:
-                for line in f:
-                    if 'BindAddress' in line:
-                        port = line.split(':')[-1].strip()
-                        wireproxy_configs.append({
-                            'config': conf_file,
-                            'port': port
-                        })
-                        break
-        except Exception:
-            pass
-    
+@app.route('/api/gost/config/<int:instance>')
+def api_get_gost_config(instance):
+    """Lấy config gost"""
     # Validate instance
-    if instance < 1 or instance > len(wireproxy_configs):
+    if instance < 1 or instance > 7:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+            'error': f'Invalid instance. Available instances: 1-7'
         }), 400
     
-    # Get config path for this instance
-    config_path = wireproxy_configs[instance - 1]['config']
-    
-    config = parse_wireproxy_config(config_path)
+    config = parse_gost_config(instance)
     if config:
         return jsonify({'success': True, 'config': config})
     else:
         return jsonify({'success': False, 'error': 'Cannot read config'}), 500
 
-@app.route('/api/wireproxy/config/<int:instance>', methods=['POST'])
-def api_save_wireproxy_config(instance):
-    """Lưu config wireproxy"""
+@app.route('/api/gost/config/<int:instance>', methods=['POST'])
+def api_save_gost_config(instance):
+    """Lưu config gost"""
     data = request.json
     
-    # Get all wireproxy configs
-    import glob
-    wireproxy_configs = []
-    for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-        try:
-            with open(conf_file, 'r') as f:
-                for line in f:
-                    if 'BindAddress' in line:
-                        port = line.split(':')[-1].strip()
-                        wireproxy_configs.append({
-                            'config': conf_file,
-                            'port': port
-                        })
-                        break
-        except Exception:
-            pass
-    
     # Validate instance
-    if instance < 1 or instance > len(wireproxy_configs):
+    if instance < 1 or instance > 7:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+            'error': f'Invalid instance. Available instances: 1-7'
         }), 400
-    
-    # Get config path for this instance
-    config_path = wireproxy_configs[instance - 1]['config']
     
     config = data.get('config')
     if not config:
         return jsonify({'success': False, 'error': 'No config provided'}), 400
     
-    if save_wireproxy_config(config_path, config):
+    if save_gost_config(instance, config):
         return jsonify({'success': True, 'message': 'Config saved successfully'})
     else:
         return jsonify({'success': False, 'error': 'Cannot save config'}), 500
 
-@app.route('/api/wireproxy/<action>', methods=['POST'])
-def api_wireproxy_action(action):
-    """Điều khiển wireproxy (start/stop/restart)"""
+@app.route('/api/gost/<action>', methods=['POST'])
+def api_gost_action(action):
+    """Điều khiển gost (start/stop/restart)"""
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': 'Invalid action'}), 400
     
-    result = run_command(f'bash manage_wireproxy.sh {action}')
+    result = run_command(f'bash manage_gost.sh {action}')
     
     return jsonify({
         'success': result['success'],
@@ -396,57 +357,41 @@ def api_wireproxy_action(action):
         'error': result['stderr']
     })
 
-@app.route('/api/wireproxy/<int:instance>/<action>', methods=['POST'])
-def api_wireproxy_instance_action(instance, action):
-    """Điều khiển từng wireproxy instance riêng lẻ"""
+@app.route('/api/gost/<int:instance>/<action>', methods=['POST'])
+def api_gost_instance_action(instance, action):
+    """Điều khiển từng gost instance riêng lẻ"""
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': 'Invalid action'}), 400
     
-    # Get all wireproxy configs
-    import glob
-    wireproxy_configs = []
-    for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-        try:
-            with open(conf_file, 'r') as f:
-                for line in f:
-                    if 'BindAddress' in line:
-                        port = line.split(':')[-1].strip()
-                        wireproxy_configs.append({
-                            'config': conf_file,
-                            'port': port
-                        })
-                        break
-        except Exception:
-            pass
-    
     # Validate instance
-    if instance < 1 or instance > len(wireproxy_configs):
+    if instance < 1 or instance > 7:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+            'error': f'Invalid instance. Available instances: 1-7'
         }), 400
     
-    # Get config and port for this instance
-    config_file = wireproxy_configs[instance - 1]['config']
-    port = wireproxy_configs[instance - 1]['port']
-    # Enforce single PID file naming by port only
-    pid_file_port = os.path.join(LOG_DIR, f'wireproxy_{port}.pid')
+    # Get port for this instance
+    gost_instances = {
+        1: "18181", 2: "18182", 3: "18183", 4: "18184",
+        5: "18185", 6: "18186", 7: "18187"
+    }
+    port = gost_instances[instance]
+    pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
     
     if action == 'stop':
-        # Stop wireproxy instance
-        target_pid_file = pid_file_port if os.path.exists(pid_file_port) else None
-        if target_pid_file:
+        # Stop gost instance
+        if os.path.exists(pid_file):
             try:
-                with open(target_pid_file) as f:
+                with open(pid_file) as f:
                     pid = int(f.read().strip())
                 os.kill(pid, 15)  # SIGTERM
                 try:
-                    os.remove(pid_file_port)
+                    os.remove(pid_file)
                 except Exception:
                     pass
                 return jsonify({
                     'success': True,
-                    'message': f'Wireproxy {instance} stopped successfully'
+                    'message': f'Gost {instance} stopped successfully'
                 })
             except (OSError, ValueError) as e:
                 return jsonify({
@@ -456,39 +401,42 @@ def api_wireproxy_instance_action(instance, action):
         else:
             return jsonify({
                 'success': False,
-                'error': 'Wireproxy not running'
+                'error': 'Gost not running'
             }), 400
     
     elif action == 'start':
         # Check if already running
-        if os.path.exists(pid_file_port):
+        if os.path.exists(pid_file):
             try:
-                with open(pid_file_port) as f:
+                with open(pid_file) as f:
                     pid = int(f.read().strip())
                 os.kill(pid, 0)  # Check if process exists
                 return jsonify({
                     'success': False,
-                    'error': 'Wireproxy already running'
+                    'error': 'Gost already running'
                 }), 400
             except OSError:
                 try:
-                    os.remove(pid_file_port)
+                    os.remove(pid_file)
                 except Exception:
                     pass
         
         # Kill any process on the port
         run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
         
-        # Start wireproxy
-        # Enforce single LOG naming by port only
-        log_file_port = os.path.join(LOG_DIR, f'wireproxy_{port}.log')
-        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_file} > {log_file_port} 2>&1 & echo $!'
+        # Get proxy URL from config
+        config = parse_gost_config(instance)
+        proxy_url = config.get('proxy_url', 'https://user:pass@az-01.protonvpn.net:4465') if config else 'https://user:pass@az-01.protonvpn.net:4465'
+        
+        # Start gost
+        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
+        cmd = f'nohup gost -L socks5://:{port} -F "{proxy_url}" > {log_file} 2>&1 & echo $!'
         result = run_command(cmd)
         
         if result['success']:
             pid = result['stdout'].strip()
             try:
-                with open(pid_file_port, 'w') as f:
+                with open(pid_file, 'w') as f:
                     f.write(pid)
             except Exception:
                 pass
@@ -498,7 +446,7 @@ def api_wireproxy_instance_action(instance, action):
             
             return jsonify({
                 'success': True,
-                'message': f'Wireproxy {instance} started successfully',
+                'message': f'Gost {instance} started successfully',
                 'pid': pid
             })
         else:
@@ -509,14 +457,13 @@ def api_wireproxy_instance_action(instance, action):
     
     elif action == 'restart':
         # Stop then start
-        target_pid_file = pid_file_port if os.path.exists(pid_file_port) else None
-        if target_pid_file:
+        if os.path.exists(pid_file):
             try:
-                with open(target_pid_file) as f:
+                with open(pid_file) as f:
                     pid = int(f.read().strip())
                 os.kill(pid, 15)
                 try:
-                    os.remove(pid_file_port)
+                    os.remove(pid_file)
                 except Exception:
                     pass
             except (OSError, ValueError):
@@ -529,14 +476,17 @@ def api_wireproxy_instance_action(instance, action):
         run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
         time.sleep(1)
         
-        # Start wireproxy
-        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
-        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_file} > {log_file} 2>&1 & echo $!'
+        # Get proxy URL from config
+        config = parse_gost_config(instance)
+        proxy_url = config.get('proxy_url', 'https://user:pass@az-01.protonvpn.net:4465') if config else 'https://user:pass@az-01.protonvpn.net:4465'
+        
+        # Start gost
+        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
+        cmd = f'nohup gost -L socks5://:{port} -F "{proxy_url}" > {log_file} 2>&1 & echo $!'
         result = run_command(cmd)
         
         if result['success']:
             pid = result['stdout'].strip()
-            pid_file = os.path.join(LOG_DIR, f'wireproxy{instance}.pid')
             with open(pid_file, 'w') as f:
                 f.write(pid)
             
@@ -545,7 +495,7 @@ def api_wireproxy_instance_action(instance, action):
             
             return jsonify({
                 'success': True,
-                'message': f'Wireproxy {instance} restarted successfully',
+                'message': f'Gost {instance} restarted successfully',
                 'pid': pid
             })
         else:
@@ -875,40 +825,26 @@ def api_haproxy_delete(port):
             'error': str(e)
         }), 500
 
-@app.route('/api/wireproxy/delete/<int:instance>', methods=['DELETE'])
-def api_wireproxy_delete(instance):
-    """Xóa Wireproxy instance"""
+@app.route('/api/gost/delete/<int:instance>', methods=['DELETE'])
+def api_gost_delete(instance):
+    """Xóa Gost instance"""
     try:
-        # Get all wireproxy configs
-        import glob
-        wireproxy_configs = []
-        for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-            try:
-                with open(conf_file, 'r') as f:
-                    for line in f:
-                        if 'BindAddress' in line:
-                            port = line.split(':')[-1].strip()
-                            wireproxy_configs.append({
-                                'config': conf_file,
-                                'port': port
-                            })
-                            break
-            except Exception:
-                pass
-        
         # Validate instance
-        if instance < 1 or instance > len(wireproxy_configs):
+        if instance < 1 or instance > 7:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+                'error': f'Invalid instance. Available instances: 1-7'
             }), 400
         
-        # Get config and port for this instance
-        config_file = wireproxy_configs[instance - 1]['config']
-        port = wireproxy_configs[instance - 1]['port']
+        # Get port for this instance
+        gost_instances = {
+            1: "18181", 2: "18182", 3: "18183", 4: "18184",
+            5: "18185", 6: "18186", 7: "18187"
+        }
+        port = gost_instances[instance]
         
         # Stop the service first if running
-        pid_file = os.path.join(LOG_DIR, f'wireproxy{instance}.pid')
+        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
         if os.path.exists(pid_file):
             try:
                 with open(pid_file) as f:
@@ -922,17 +858,18 @@ def api_wireproxy_delete(instance):
         run_command(f'lsof -ti :{port} | xargs kill -9 2>/dev/null || true')
         
         # Remove config file
+        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
         if os.path.exists(config_file):
             os.remove(config_file)
         
         # Clean up log files
-        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
+        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
         if os.path.exists(log_file):
             os.remove(log_file)
         
         return jsonify({
             'success': True,
-            'message': f'Wireproxy {instance} (port {port}) deleted successfully'
+            'message': f'Gost {instance} (port {port}) deleted successfully'
         })
         
     except Exception as e:
@@ -966,8 +903,16 @@ def api_get_logs(service):
     # Dynamic log file mapping
     log_file = None
     
-    # Check for wireproxy logs (wireproxy18181, wireproxy18182, etc.)
-    if service.startswith('wireproxy'):
+    # Check for gost logs (gost1, gost2, etc.)
+    if service.startswith('gost'):
+        # Extract instance number from service name (e.g., gost1 -> 1)
+        instance = service.replace('gost', '')
+        if instance.isdigit():
+            log_file = f'gost{instance}.log'
+        else:
+            return jsonify({'success': False, 'error': 'Invalid gost instance'}), 400
+    # Check for wireproxy logs (legacy support)
+    elif service.startswith('wireproxy'):
         # Extract port number from service name (e.g., wireproxy18183 -> 18183)
         port = service.replace('wireproxy', '')
         # Map port to instance number for new format
@@ -1118,7 +1063,7 @@ def api_nordvpn_best_server():
 
 @app.route('/api/nordvpn/apply/<int:instance>', methods=['POST'])
 def api_nordvpn_apply_server(instance):
-    """Áp dụng server NordVPN vào wireproxy instance"""
+    """Áp dụng server NordVPN vào gost instance"""
     try:
         data = request.json
         server_name = data.get('server_name')
@@ -1131,98 +1076,59 @@ def api_nordvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Get all wireproxy configs
-        import glob
-        wireproxy_configs = []
-        for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-            try:
-                with open(conf_file, 'r') as f:
-                    for line in f:
-                        if 'BindAddress' in line:
-                            port = line.split(':')[-1].strip()
-                            wireproxy_configs.append({
-                                'config': conf_file,
-                                'port': port
-                            })
-                            break
-            except Exception:
-                pass
-        
         # Validate instance
-        if instance < 1 or instance > len(wireproxy_configs):
+        if instance < 1 or instance > 7:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+                'error': f'Invalid instance. Available instances: 1-7'
             }), 400
         
-        # Get config path for this instance
-        config_path = wireproxy_configs[instance - 1]['config']
-        port = wireproxy_configs[instance - 1]['port']
+        # Get gost port for this instance
+        gost_ports = {1: "18181", 2: "18182", 3: "18183", 4: "18184", 
+                      5: "18185", 6: "18186", 7: "18187"}
+        port = gost_ports[instance]
         
-        # Use NordVPN private key (always use default for NordVPN)
-        # NordVPN requires provider-specific key, don't reuse from config
-        from nordvpn_api import DEFAULT_PRIVATE_KEY as NORDVPN_PRIVATE_KEY
-        private_key = NORDVPN_PRIVATE_KEY
-        
-        # Generate new config with NordVPN server
-        bind_address = f"127.0.0.1:{port}"
-        new_config = nordvpn_api.generate_wireguard_config(
-            server=server,
-            private_key=private_key,
-            bind_address=bind_address
-        )
-        
-        # Save new config
-        if not save_wireproxy_config(config_path, new_config):
+        # Get proxy URL for NordVPN server
+        proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
+        if not proxy_url:
             return jsonify({
                 'success': False,
-                'error': 'Failed to save config'
+                'error': 'Failed to generate proxy URL for NordVPN server'
             }), 500
         
-        # Restart wireproxy instance
-        pid_file = os.path.join(LOG_DIR, f'wireproxy{instance}.pid')
+        # Save gost config
+        config = {
+            'provider': 'nordvpn',
+            'country': server['hostname'],
+            'proxy_url': proxy_url
+        }
         
-        # Stop if running
-        if os.path.exists(pid_file):
-            try:
-                with open(pid_file) as f:
-                    pid = int(f.read().strip())
-                os.kill(pid, 15)
-                os.remove(pid_file)
-            except (OSError, ValueError):
-                pass
+        if not save_gost_config(instance, config):
+            return jsonify({
+                'success': False,
+                'error': 'Failed to save gost config'
+            }), 500
         
-        import time
-        time.sleep(1)
-        
-        # Kill any process on the port
-        run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
-        time.sleep(1)
-        
-        # Start wireproxy
-        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
-        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_path} > {log_file} 2>&1 & echo $!'
+        # Restart gost instance using manage_gost.sh
+        cmd = f'./manage_gost.sh restart {instance}'
         result = run_command(cmd)
         
         if result['success']:
-            pid = result['stdout'].strip()
-            with open(pid_file, 'w') as f:
-                f.write(pid)
-            
             # Trigger health monitor
             trigger_health_check()
             
             return jsonify({
                 'success': True,
-                'message': f'Applied NordVPN server {server["name"]} to Wireproxy {instance} (port {port})',
+                'message': f'Applied NordVPN server {server["name"]} to Gost {instance} (port {port})',
                 'server': server,
-                'pid': pid,
-                'port': port
+                'instance': instance,
+                'port': port,
+                'proxy_url': proxy_url
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result['stderr']
+                'error': f'Failed to restart Gost: {result["stderr"]}'
             }), 500
             
     except Exception as e:
@@ -1332,7 +1238,7 @@ def api_protonvpn_best_server():
 
 @app.route('/api/protonvpn/apply/<int:instance>', methods=['POST'])
 def api_protonvpn_apply_server(instance):
-    """Áp dụng ProtonVPN server vào Wireproxy instance"""
+    """Áp dụng ProtonVPN server vào gost instance"""
     try:
         if not protonvpn_api:
             return jsonify({'success': False, 'error': 'ProtonVPN API not configured'}), 400
@@ -1348,99 +1254,60 @@ def api_protonvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Get all wireproxy configs
-        import glob
-        wireproxy_configs = []
-        for conf_file in sorted(glob.glob(os.path.join(BASE_DIR, 'wg*.conf'))):
-            try:
-                with open(conf_file, 'r') as f:
-                    for line in f:
-                        if 'BindAddress' in line:
-                            port = line.split(':')[-1].strip()
-                            wireproxy_configs.append({
-                                'config': conf_file,
-                                'port': port
-                            })
-                            break
-            except Exception:
-                pass
-        
         # Validate instance
-        if instance < 1 or instance > len(wireproxy_configs):
+        if instance < 1 or instance > 7:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-{len(wireproxy_configs)}'
+                'error': f'Invalid instance. Available instances: 1-7'
             }), 400
         
-        # Get config path for this instance
-        config_path = wireproxy_configs[instance - 1]['config']
-        port = wireproxy_configs[instance - 1]['port']
+        # Get gost port for this instance
+        gost_ports = {1: "18181", 2: "18182", 3: "18183", 4: "18184", 
+                      5: "18185", 6: "18186", 7: "18187"}
+        port = gost_ports[instance]
         
-        # Use ProtonVPN private key (always use default for ProtonVPN)
-        # ProtonVPN requires provider-specific key, don't reuse from config
-        from protonvpn_api import DEFAULT_PRIVATE_KEY as PROTONVPN_PRIVATE_KEY
-        private_key = PROTONVPN_PRIVATE_KEY
-        
-        # Generate new config with ProtonVPN server
-        bind_address = f"127.0.0.1:{port}"
-        new_config = protonvpn_api.generate_wireguard_config(
-            server=server,
-            private_key=private_key,
-            bind_address=bind_address
-        )
-        
-        # Save new config
-        if not save_wireproxy_config(config_path, new_config):
+        # Get proxy URL for ProtonVPN server
+        proxy_url = proxy_api.get_protonvpn_proxy(server['domain'])
+        if not proxy_url:
             return jsonify({
                 'success': False,
-                'error': 'Failed to save config'
+                'error': 'Failed to generate proxy URL for ProtonVPN server'
             }), 500
         
-        # Restart wireproxy instance
-        pid_file = os.path.join(LOG_DIR, f'wireproxy{instance}.pid')
+        # Save gost config
+        config = {
+            'provider': 'protonvpn',
+            'country': server['domain'],
+            'proxy_url': proxy_url
+        }
         
-        # Stop if running
-        if os.path.exists(pid_file):
-            try:
-                with open(pid_file) as f:
-                    pid = int(f.read().strip())
-                os.kill(pid, 15)
-                os.remove(pid_file)
-            except (OSError, ValueError):
-                pass
+        if not save_gost_config(instance, config):
+            return jsonify({
+                'success': False,
+                'error': 'Failed to save gost config'
+            }), 500
         
-        import time
-        time.sleep(1)
-        
-        # Kill any process on the port
-        run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
-        time.sleep(1)
-        
-        # Start wireproxy
-        log_file = os.path.join(LOG_DIR, f'wireproxy{instance}.log')
-        cmd = f'nohup {os.path.join(BASE_DIR, "wireproxy")} -c {config_path} > {log_file} 2>&1 & echo $!'
+        # Restart gost instance using manage_gost.sh
+        cmd = f'./manage_gost.sh restart {instance}'
         result = run_command(cmd)
         
         if result['success']:
-            pid = result['stdout'].strip()
-            with open(pid_file, 'w') as f:
-                f.write(pid)
-            
             # Trigger health monitor
             trigger_health_check()
             
             name = server.get('name', 'Unknown')
             return jsonify({
                 'success': True,
-                'message': f'Applied ProtonVPN {name} to Wireproxy {instance} (port {port})',
+                'message': f'Applied ProtonVPN {name} to Gost {instance} (port {port})',
                 'server': server,
-                'pid': pid,
-                'port': port
+                'instance': instance,
+                'port': port,
+                'proxy_url': proxy_url
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result['stderr']
+                'error': f'Failed to restart Gost: {result["stderr"]}'
             }), 500
             
     except Exception as e:
@@ -2047,7 +1914,7 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                             for attempt in range(max_attempts):
                                 # Random select a server
                                 selected_server = random.choice(servers)
-                                server_name = selected_server['name']
+                                server_name = selected_server['hostname'] if vpn_provider == 'nordvpn' else selected_server['name']
                                 
                                 # Get domain name instead of display name
                                 if 'domain' in selected_server:
@@ -2227,6 +2094,8 @@ def _create_haproxy_with_server(port, server_name, vpn_provider):
                         server_name = server['hostname']  # NordVPN: use hostname
                     elif vpn_provider == 'protonvpn':
                         server_name = server['domain']    # ProtonVPN: use domain
+                    elif vpn_provider == 'nordvpn':
+                        server_name = server['hostname']  # NordVPN: use hostname
                     else:
                         server_name = server['name']      # Fallback: use name
             else:
@@ -2249,36 +2118,36 @@ def _create_haproxy_with_server(port, server_name, vpn_provider):
 def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, private_key):
     """Implementation chung cho việc tạo HAProxy với server"""
     try:
-        # Calculate wireproxy port based on HAProxy port mapping
-        # HAProxy port 7891 -> Wireproxy port 18181
-        # HAProxy port 7892 -> Wireproxy port 18182
-        # HAProxy port 7893 -> Wireproxy port 18183
-        # Formula: wireproxy_port = 18181 + (haproxy_port - 7891)
+        # Calculate gost port based on HAProxy port mapping
+        # HAProxy port 7891 -> Gost port 18181
+        # HAProxy port 7892 -> Gost port 18182
+        # HAProxy port 7893 -> Gost port 18183
+        # Formula: gost_port = 18181 + (haproxy_port - 7891)
         try:
             haproxy_port_num = int(port)
-            wireproxy_port = 18181 + (haproxy_port_num - 7891)
+            gost_port = 18181 + (haproxy_port_num - 7891)
             
             # Validate port range
-            if wireproxy_port < 18181 or wireproxy_port > 18999:
-                return {'success': False, 'error': f'Invalid port mapping: HAProxy {port} -> Wireproxy {wireproxy_port} (range: 18181-18999)'}
+            if gost_port < 18181 or gost_port > 18999:
+                return {'success': False, 'error': f'Invalid port mapping: HAProxy {port} -> Gost {gost_port} (range: 18181-18999)'}
                 
         except ValueError:
             return {'success': False, 'error': f'Invalid HAProxy port: {port}'}
         
-        # Check if wireproxy port is already in use by another HAProxy
+        # Check if gost port is already in use by another HAProxy
         import glob
         for cfg_file in glob.glob(os.path.join(BASE_DIR, 'config', 'haproxy_*.cfg')):
             try:
                 with open(cfg_file, 'r') as f:
                     content = f.read()
                     import re
-                    # Find wireproxy port in HAProxy config
-                    match = re.search(r'server\s+wg\d+\s+127\.0\.0\.1:(\d+)', content)
+                    # Find gost port in HAProxy config
+                    match = re.search(r'server\s+gost\d+\s+127\.0\.0\.1:(\d+)', content)
                     if match:
-                        existing_wp_port = int(match.group(1))
-                        if existing_wp_port == wireproxy_port:
-                            # This wireproxy port is already used by another HAProxy
-                            return {'success': False, 'error': f'Wireproxy port {wireproxy_port} is already used by another HAProxy. Port mapping conflict.'}
+                        existing_gost_port = int(match.group(1))
+                        if existing_gost_port == gost_port:
+                            # This gost port is already used by another HAProxy
+                            return {'success': False, 'error': f'Gost port {gost_port} is already used by another HAProxy. Port mapping conflict.'}
             except Exception:
                 pass
         
@@ -2290,61 +2159,48 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
         else:
             return {'success': False, 'error': f'Unknown VPN provider: {vpn_provider}'}
         
-        # Create wireproxy config
-        wireproxy_config_path = os.path.join(BASE_DIR, f'wg{wireproxy_port}.conf')
-        bind_address = f'127.0.0.1:{wireproxy_port}'
+        # Create gost config
+        gost_instance = gost_port - 18180  # Convert port to instance number
+        proxy_url = None
         
-        wireproxy_config = api.generate_wireguard_config(
-            server=server,
-            private_key=private_key,
-            bind_address=bind_address
-        )
+        if vpn_provider == 'nordvpn':
+            proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
+        elif vpn_provider == 'protonvpn':
+            proxy_url = proxy_api.get_protonvpn_proxy(server['name'])
         
-        # Save wireproxy config
-        if not save_wireproxy_config(wireproxy_config_path, wireproxy_config):
-            return {'success': False, 'error': 'Failed to save wireproxy config'}
+        if not proxy_url:
+            return {'success': False, 'error': f'Failed to generate proxy URL for {vpn_provider} server'}
         
-        # Start wireproxy with verification and logging
+        # Save gost config
+        config = {
+            'provider': vpn_provider,
+            'country': server['hostname'] if vpn_provider == 'nordvpn' else server['name'],
+            'proxy_url': proxy_url
+        }
+        
+        if not save_gost_config(gost_instance, config):
+            return {'success': False, 'error': 'Failed to save gost config'}
+        
+        # Start gost with verification and logging
         os.makedirs(LOG_DIR, exist_ok=True)
-        wireproxy_bin = os.path.join(BASE_DIR, 'wireproxy')
-        wireproxy_pid_file = os.path.join(LOG_DIR, f'wireproxy_{wireproxy_port}.pid')
-        wireproxy_log_file = os.path.join(LOG_DIR, f'wireproxy_{wireproxy_port}.log')
-
-        def _start_and_verify_wireproxy():
-            cmd_local = f'nohup {wireproxy_bin} -c {wireproxy_config_path} > {wireproxy_log_file} 2>&1 & echo $!'
-            res = run_command(cmd_local)
-            if not res['success']:
-                return {'ok': False, 'error': res['stderr']}
-            pid_str = res['stdout'].strip()
-            try:
-                with open(wireproxy_pid_file, 'w') as fp:
-                    fp.write(pid_str)
-            except Exception:
-                pass
-
-            # poll readiness: pid alive and port listening (LISTEN state only)
-            import time
-            for _ in range(40):  # ~20s max
-                time.sleep(0.5)
-                # check pid
-                try:
-                    os.kill(int(pid_str), 0)
-                    pid_ok = True
-                except Exception:
-                    pid_ok = False
-                # check port listening
-                port_check = run_command(f'lsof -ti :{wireproxy_port}')
-                port_ok = bool(port_check['success'] and port_check['stdout'].strip())
-                if pid_ok or port_ok:
-                    return {'ok': True, 'pid': pid_str}
-            return {'ok': False, 'error': 'wireproxy not listening'}
-
-        start_try = _start_and_verify_wireproxy()
-        if not start_try['ok']:
-            # retry once
-            start_try = _start_and_verify_wireproxy()
-        if not start_try['ok']:
-            return {'success': False, 'error': f'Failed to start wireproxy on {wireproxy_port}: {start_try.get("error", "unknown error")}'}
+        
+        # Start gost instance using manage_gost.sh
+        cmd = f'./manage_gost.sh start {gost_instance}'
+        result = run_command(cmd)
+        
+        if not result['success']:
+            return {'success': False, 'error': f'Failed to start gost: {result["stderr"]}'}
+        
+        # Wait for gost to be ready
+        import time
+        for _ in range(20):  # ~10s max
+            time.sleep(0.5)
+            # Check if port is listening
+            port_check = run_command(f'lsof -ti :{gost_port}')
+            if port_check['success'] and port_check['stdout'].strip():
+                break
+        else:
+            return {'success': False, 'error': 'Timeout waiting for gost to start'}
         
         # Force kill any HAProxy processes on this port
         try:
@@ -2410,7 +2266,7 @@ backend socks_back_{port}
     balance first
     option tcp-check
     tcp-check connect
-    server wg1 127.0.0.1:{wireproxy_port} check inter 1s rise 1 fall 2 on-error fastinter
+    server gost1 127.0.0.1:{gost_port} check inter 1s rise 1 fall 2 on-error fastinter
     server cloudflare_warp 127.0.0.1:8111 check inter 1s rise 1 fall 2 on-error fastinter backup
 
 listen stats_{port}
@@ -2439,19 +2295,18 @@ listen stats_{port}
         result = run_command(cmd)
         
         if not result['success']:
-            # Cleanup wireproxy if HAProxy fails
+            # Cleanup gost if HAProxy fails
             try:
-                os.kill(int(wireproxy_pid), 15)
-                os.remove(wireproxy_pid_file)
-                os.remove(wireproxy_config_path)
+                # Stop gost instance
+                run_command(f'./manage_gost.sh stop {gost_instance}')
             except Exception:
                 pass
             return {'success': False, 'error': f'Failed to start HAProxy: {result["stderr"]}'}
         
         # Start health monitor
-        _start_health_monitor(port, [wireproxy_port])
+        _start_health_monitor(port, [gost_port])
         
-        return {'success': True, 'port': port, 'server': server_name, 'wireproxy_port': wireproxy_port}
+        return {'success': True, 'port': port, 'server': server_name, 'gost_port': gost_port}
         
     except Exception as e:
         return {'success': False, 'error': str(e)}
@@ -2459,29 +2314,19 @@ listen stats_{port}
 def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
     """Reconfigure existing HAProxy với server mới"""
     try:
-        # Find associated wireproxy
+        # Find associated gost
         haproxy_config_path = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
-        wireproxy_port = None
-        wireproxy_config_path = None
+        gost_port = None
+        gost_instance = None
         
         if os.path.exists(haproxy_config_path):
             with open(haproxy_config_path, 'r') as f:
                 content = f.read()
                 import re
-                match = re.search(r'server\s+wg\d+\s+127\.0\.0\.1:(\d+)', content)
+                match = re.search(r'server\s+gost\d+\s+127\.0\.0\.1:(\d+)', content)
                 if match:
-                    wireproxy_port = match.group(1)
-                    
-                    # Find wireproxy config
-                    import glob
-                    for conf_file in glob.glob(os.path.join(BASE_DIR, 'wg*.conf')):
-                        try:
-                            with open(conf_file, 'r') as f:
-                                if f'BindAddress = 127.0.0.1:{wireproxy_port}' in f.read():
-                                    wireproxy_config_path = conf_file
-                                    break
-                        except Exception:
-                            continue
+                    gost_port = int(match.group(1))
+                    gost_instance = gost_port - 18180  # Convert port to instance number
         
         # Stop existing HAProxy
         pid_file = os.path.join(BASE_DIR, 'logs', f'haproxy_{port}.pid')
@@ -2504,51 +2349,29 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
             except Exception:
                 pass
         
-        # Stop and reconfigure wireproxy if found
-        if wireproxy_port and wireproxy_config_path:
-            # CRITICAL: Force kill ALL processes using wireproxy port to ensure clean restart
-            wireproxy_pid_file = os.path.join(LOG_DIR, f'wireproxy_{wireproxy_port}.pid')
+        # Stop and reconfigure gost if found
+        if gost_port and gost_instance:
+            # Stop gost instance
+            run_command(f'./manage_gost.sh stop {gost_instance}')
             
-            # Kill by PID file first
-            if os.path.exists(wireproxy_pid_file):
-                try:
-                    with open(wireproxy_pid_file, 'r') as f:
-                        pid = int(f.read().strip())
-                    os.kill(pid, 9)  # SIGKILL for immediate termination
-                    os.remove(wireproxy_pid_file)
-                except Exception:
-                    pass
-            
-            # Force kill any process still holding the port
+            # Wait for port to be released
             import time
-            time.sleep(0.5)  # Give process time to release port
-            result = run_command(f'lsof -ti :{wireproxy_port}')
-            if result['success'] and result['stdout'].strip():
-                pids = result['stdout'].strip().split('\n')
-                for pid in pids:
-                    try:
-                        os.kill(int(pid), 9)
-                    except Exception:
-                        pass
+            time.sleep(1)
             
             # Wait for port to be released
             for _ in range(10):  # Wait up to 5 seconds
                 time.sleep(0.5)
-                result = run_command(f'lsof -ti :{wireproxy_port}')
+                result = run_command(f'lsof -ti :{gost_port}')
                 if not (result['success'] and result['stdout'].strip()):
                     break
             
-            # Update wireproxy config with new server
+            # Update gost config with new server
             if vpn_provider == 'nordvpn':
                 api = nordvpn_api
-                from nordvpn_api import DEFAULT_PRIVATE_KEY
-                private_key = DEFAULT_PRIVATE_KEY
             elif vpn_provider == 'protonvpn':
                 if not protonvpn_api:
                     return {'success': False, 'error': 'ProtonVPN API not configured'}
                 api = protonvpn_api
-                from protonvpn_api import DEFAULT_PRIVATE_KEY
-                private_key = DEFAULT_PRIVATE_KEY
             else:
                 return {'success': False, 'error': f'Unknown VPN provider: {vpn_provider}'}
             
@@ -2565,6 +2388,8 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                             server_name = server['hostname']  # NordVPN: use hostname
                         elif vpn_provider == 'protonvpn':
                             server_name = server['domain']    # ProtonVPN: use domain
+                        elif vpn_provider == 'nordvpn':
+                            server_name = server['hostname']  # NordVPN: use hostname
                         else:
                             server_name = server['name']      # Fallback: use name
                 
@@ -2617,6 +2442,8 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                                 server_name = server['hostname']  # NordVPN: use hostname
                             elif vpn_provider == 'protonvpn':
                                 server_name = server['domain']    # ProtonVPN: use domain
+                            elif vpn_provider == 'nordvpn':
+                                server_name = server['hostname']  # NordVPN: use hostname
                             else:
                                 server_name = server['name']      # Fallback: use name
                             
@@ -2641,6 +2468,8 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                                     server_name = server['hostname']  # NordVPN: use hostname
                                 elif vpn_provider == 'protonvpn':
                                     server_name = server['domain']    # ProtonVPN: use domain
+                                elif vpn_provider == 'nordvpn':
+                                    server_name = server['hostname']  # NordVPN: use hostname
                                 else:
                                     server_name = server['name']      # Fallback: use name
                                 
@@ -2669,6 +2498,8 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                                         server_name = server['hostname']  # NordVPN: use hostname
                                     elif other_provider == 'protonvpn':
                                         server_name = server['domain']    # ProtonVPN: use domain
+                                    elif other_provider == 'nordvpn':
+                                        server_name = server['hostname']  # NordVPN: use hostname
                                     else:
                                         server_name = server['name']      # Fallback: use name
                                     
@@ -2681,74 +2512,49 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                         # If still no server found, return error
                         return {'success': False, 'error': f'Server {server_name} not found and no alternative server available'}
             
-            bind_address = f'127.0.0.1:{wireproxy_port}'
-            wireproxy_config = api.generate_wireguard_config(
-                server=server,
-                private_key=private_key,
-                bind_address=bind_address
-            )
+            # Get proxy URL for the server
+            proxy_url = None
+            if vpn_provider == 'nordvpn':
+                proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
+            elif vpn_provider == 'protonvpn':
+                proxy_url = proxy_api.get_protonvpn_proxy(server['name'])
             
-            # Save wireproxy config
-            if not save_wireproxy_config(wireproxy_config_path, wireproxy_config):
-                return {'success': False, 'error': 'Failed to save wireproxy config'}
+            if not proxy_url:
+                return {'success': False, 'error': f'Failed to generate proxy URL for {vpn_provider} server'}
             
-            # Restart wireproxy with verification (no symlinks; single source of truth)
-            wireproxy_bin = os.path.join(BASE_DIR, 'wireproxy')
-            wireproxy_log_file = os.path.join(LOG_DIR, f'wireproxy_{wireproxy_port}.log')
+            # Save gost config
+            config = {
+                'provider': vpn_provider,
+                'country': server['name'],
+                'proxy_url': proxy_url
+            }
+            
+            if not save_gost_config(gost_instance, config):
+                return {'success': False, 'error': 'Failed to save gost config'}
+            
+            # Gost config already saved above
+            
+            # Restart gost with verification
 
-            def _restart_and_verify_wireproxy():
-                res = run_command(f'nohup {wireproxy_bin} -c {wireproxy_config_path} > {wireproxy_log_file} 2>&1 & echo $!')
-                if not res['success']:
-                    return {'ok': False, 'error': res['stderr']}
-                pid_str = res['stdout'].strip()
-                try:
-                    with open(wireproxy_pid_file, 'w') as fp:
-                        fp.write(pid_str)
-                except Exception:
-                    pass
+            # Restart gost instance
+            cmd = f'./manage_gost.sh restart {gost_instance}'
+            result = run_command(cmd)
+            
+            if not result['success']:
+                return {'success': False, 'error': f'Failed to restart gost: {result["stderr"]}'}
+            
+            # Wait for gost to be ready
+            import time
+            for _ in range(20):  # ~10s max
+                time.sleep(0.5)
+                # Check if port is listening
+                port_check = run_command(f'lsof -ti :{gost_port}')
+                if port_check['success'] and port_check['stdout'].strip():
+                    break
+            else:
+                return {'success': False, 'error': 'Timeout waiting for gost to start'}
 
-                # Verify process/port becomes healthy
-                import time
-                for _ in range(40):  # ~20s max
-                    time.sleep(0.5)
-                    try:
-                        os.kill(int(pid_str), 0)
-                        pid_ok = True
-                    except Exception:
-                        pid_ok = False
-                    port_check = run_command(f'lsof -ti :{wireproxy_port} -sTCP:LISTEN')
-                    port_ok = bool(port_check['success'] and port_check['stdout'].strip())
-                    if pid_ok and port_ok:
-                        return {'ok': True, 'pid': pid_str}
-                return {'ok': False, 'error': 'wireproxy not listening'}
-
-            # CRITICAL: Must restart wireproxy successfully before proceeding
-            verify_res = _restart_and_verify_wireproxy()
-            if not verify_res['ok']:
-                # Try one more time
-                verify_res = _restart_and_verify_wireproxy()
-            if not verify_res['ok']:
-                # If wireproxy fails, we MUST restore the original server to avoid leaving port in broken state
-                print(f"WARNING: Failed to restart wireproxy {wireproxy_port}, restoring original server")
-                # Try to restore original server configuration
-                try:
-                    # Get original server from backup or recreate with original server
-                    original_server = _get_server_from_haproxy_config(haproxy_config_path)
-                    if original_server:
-                        # Restore original wireproxy config
-                        original_wireproxy_config = api.generate_wireguard_config(
-                            server=api.get_server_by_name(original_server),
-                            private_key=private_key,
-                            bind_address=f'127.0.0.1:{wireproxy_port}'
-                        )
-                        save_wireproxy_config(wireproxy_config_path, original_wireproxy_config)
-                        # Try to restart with original config
-                        verify_res = _restart_and_verify_wireproxy()
-                        if verify_res['ok']:
-                            return {'success': False, 'error': f'Failed to reconfigure to {server_name}, restored original server {original_server}'}
-                except Exception:
-                    pass
-                return {'success': False, 'error': f'Failed to restart wireproxy {wireproxy_port}: {verify_res.get("error", "unknown error")}. Port may be in broken state.'}
+            # Gost restarted successfully
         
         # CRITICAL: Restart HAProxy and verify it's working
         try:
@@ -2770,19 +2576,19 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
             return {'success': False, 'error': f'HAProxy started but not listening on port {port}'}
         
         # Restart health monitor
-        if wireproxy_port:
-            _start_health_monitor(port, [wireproxy_port])
+        if gost_port:
+            _start_health_monitor(port, [gost_port])
         
-        return {'success': True, 'port': port, 'server': server_name}
+        return {'success': True, 'port': port, 'server': server_name, 'gost_port': gost_port}
         
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
-def _start_health_monitor(haproxy_port, wireproxy_ports):
+def _start_health_monitor(haproxy_port, gost_ports):
     """Start health monitor for HAProxy instance"""
     try:
         script_path = os.path.join(BASE_DIR, 'setup_haproxy.sh')
-        cmd = f'{script_path} --sock-port {haproxy_port} --stats-port {8000 + int(haproxy_port) - 7890} --wg-ports {",".join(map(str, wireproxy_ports))} --daemon'
+        cmd = f'{script_path} --sock-port {haproxy_port} --stats-port {8000 + int(haproxy_port) - 7890} --gost-ports {",".join(map(str, gost_ports))} --daemon'
         
         # Run in background
         subprocess.Popen(cmd, shell=True, cwd=BASE_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2796,13 +2602,13 @@ if __name__ == '__main__':
     os.makedirs(LOG_DIR, exist_ok=True)
     
     print("=" * 60)
-    print("🌐 HAProxy & Wireproxy Web UI")
+    print("🌐 HAProxy & Gost Web UI")
     print("=" * 60)
     print(f"📂 Base Directory: {BASE_DIR}")
     print(f"📝 Log Directory: {LOG_DIR}")
     print(f"🔧 Config Files:")
-    print(f"   - Wireproxy 1: {WG1_CONF}")
-    print(f"   - Wireproxy 2: {WG2_CONF}")
+    print(f"   - Gost 1: {os.path.join(LOG_DIR, 'gost1.config')}")
+    print(f"   - Gost 2: {os.path.join(LOG_DIR, 'gost2.config')}")
     print("=" * 60)
     print("🚀 Starting Web UI on http://0.0.0.0:5000")
     print("=" * 60)

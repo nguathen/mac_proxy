@@ -19,12 +19,12 @@ echo ""
 #    ./stop_webui.sh
 #fi
 
-# Dừng Wireproxy
+# Dừng Gost
 echo ""
-echo "🛑 Stopping wireproxy instances..."
-if [ -f "manage_wireproxy.sh" ]; then
-    chmod +x manage_wireproxy.sh
-    ./manage_wireproxy.sh stop
+echo "🛑 Stopping gost instances..."
+if [ -f "manage_gost.sh" ]; then
+    chmod +x manage_gost.sh
+    ./manage_gost.sh stop
 fi
 
 

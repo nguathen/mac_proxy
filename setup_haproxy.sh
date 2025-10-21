@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # setup_haproxy.sh
-# Multi-instance HAProxy with wiresock backends & Cloudflare WARP fallback
+# Multi-instance HAProxy with gost backends & Cloudflare WARP fallback
 # macOS/Linux compatible | 2025-10
 
 set -euo pipefail
 
 ### --- Default settings ---
 HAPROXY_BIN="$(command -v haproxy || echo /opt/homebrew/sbin/haproxy)"
-WIRESOCK_BIN="$(command -v wiresock-client || echo /usr/local/bin/wiresock-client)"
-WIRESOCK_DIR="./wireguard"
+GOST_BIN="$(command -v gost || echo gost)"
+GOST_DIR="./logs"
 HOST_PROXY="127.0.0.1:8111"  # Cloudflare WARP proxy
-WG_PORTS=(18181 18182)
+GOST_PORTS=(18181 18182 18183 18184 18185 18186 18187)
 STATS_AUTH="admin:admin123"
 TEST_IP_URL="https://api.ipify.org"
 HEALTH_INTERVAL=30
@@ -24,25 +24,25 @@ LOG_DIR="./logs"
 ### --- CLI parsing ---
 usage() {
   echo "Usage:
-  $0 [--host-proxy IP:PORT] [--wg-ports 18181,18182]
+  $0 [--host-proxy IP:PORT] [--gost-ports 18181,18182]
      [--sock-port 1080] [--stats-port 8080]
-     [--wiresock-folder DIR] [--stats-auth user:pass] 
+     [--gost-folder DIR] [--stats-auth user:pass] 
      [--health-interval 30] [--daemon]
      
 Examples:
   # HAProxy instance 1 (port 7891)
-  $0 --sock-port 7891 --stats-port 8091 --wg-ports 18181 --daemon
+  $0 --sock-port 7891 --stats-port 8091 --gost-ports 18181 --daemon
   
   # HAProxy instance 2 (port 7892)
-  $0 --sock-port 7892 --stats-port 8092 --wg-ports 18182 --daemon"
+  $0 --sock-port 7892 --stats-port 8092 --gost-ports 18182 --daemon"
   exit 1
 }
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --host-proxy) HOST_PROXY="$2"; shift 2 ;;
-    --wg-ports) IFS=',' read -r -a WG_PORTS <<< "$2"; shift 2 ;;
-    --wiresock-folder) WIRESOCK_DIR="$2"; shift 2 ;;
+    --gost-ports) IFS=',' read -r -a GOST_PORTS <<< "$2"; shift 2 ;;
+    --gost-folder) GOST_DIR="$2"; shift 2 ;;
     --stats-auth) STATS_AUTH="$2"; shift 2 ;;
     --sock-port) SOCK_PORT="$2"; shift 2 ;;
     --stats-port) STATS_PORT="$2"; shift 2 ;;
@@ -98,17 +98,17 @@ check_backend() {
 
 build_haproxy_cfg() {
   local active_port="$1"
-  local wg_servers=""
+  local gost_servers=""
   local i=1
   
-  for p in "${WG_PORTS[@]}"; do
+  for p in "${GOST_PORTS[@]}"; do
     if [[ "$active_port" == "none" ]]; then
-      # All WG servers as backup when forcing WARP
-      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup disabled\n"
+      # All gost servers as backup when forcing WARP
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup disabled\n"
     elif [[ "$p" == "$active_port" ]]; then
-      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter\n"
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter\n"
     else
-      wg_servers+="    server wg${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
     fi
     i=$((i+1))
   done
@@ -139,7 +139,7 @@ backend socks_back_${SOCK_PORT}
     balance first
     option tcp-check
     tcp-check connect
-$(printf "%b" "$wg_servers")
+$(printf "%b" "$gost_servers")
     server cloudflare_warp ${HOST_PROXY} check inter 1s rise 1 fall 2 on-error fastinter backup
 
 listen stats_${SOCK_PORT}
@@ -162,7 +162,7 @@ do_health_check() {
   local config_changed=false
   local current_best=""
 
-  for p in "${WG_PORTS[@]}"; do
+  for p in "${GOST_PORTS[@]}"; do
     result=$(check_backend "$p")
     IFS=',' read -r port status latency <<< "$result"
     
@@ -182,7 +182,7 @@ do_health_check() {
 
   # Determine current best backend
   if [[ -n "$best_port" ]]; then
-    current_best="wiresock:$best_port"
+    current_best="gost:$best_port"
   else
     current_best="warp"
   fi
@@ -197,7 +197,7 @@ do_health_check() {
     echo "$current_best" > "$last_backend_file"
     
     if [[ -n "$best_port" ]]; then
-      log "🔄 Backend changed to: wiresock:$best_port (${best_latency}s)"
+      log "🔄 Backend changed to: gost:$best_port (${best_latency}s)"
       build_haproxy_cfg "$best_port"
       reload_haproxy
     else
@@ -246,12 +246,12 @@ log "━━━━━━━━━━━━━━━━━━━━━━━━━
 log "🚀 Starting HAProxy instance"
 log "   SOCKS Port: $SOCK_PORT"
 log "   Stats Port: $STATS_PORT (http://0.0.0.0:$STATS_PORT/haproxy?stats)"
-log "   Wiresock Backends: ${WG_PORTS[*]}"
+log "   Gost Backends: ${GOST_PORTS[*]}"
 log "   Fallback: Cloudflare WARP ($HOST_PROXY)"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Initial config with first WG port as primary
-build_haproxy_cfg "${WG_PORTS[0]}"
+# Initial config with first gost port as primary
+build_haproxy_cfg "${GOST_PORTS[0]}"
 reload_haproxy
 
 if $DAEMON_MODE; then

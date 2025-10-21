@@ -307,7 +307,7 @@
         <div class="grid">
             <!-- Wireproxy Card -->
             <div class="card">
-                <h2>🔐 Wireproxy Services</h2>
+                <h2>🔐 Gost Services</h2>
                 <div id="wireproxy-status"></div>
                 <div class="btn-group">
                     <button class="btn btn-success" onclick="controlWireproxy('start')">Start All</button>
@@ -484,13 +484,13 @@
                 const data = await response.json();
                 
                 // Store current instances for VPN server selection
-                currentWireproxyInstances = data.wireproxy;
+                currentWireproxyInstances = data.gost;
                 
                 // Update VPN server selection buttons
                 updateVPNButtons();
                 
                 // Update Wireproxy status
-                const wireproxyHtml = data.wireproxy.map((wp, idx) => {
+                const wireproxyHtml = data.gost.map((wp, idx) => {
                     const instance = idx + 1;
                     return `
                     <div class="service-item">
@@ -552,7 +552,7 @@
             if (!confirm(`Are you sure you want to ${action} all wireproxy instances?`)) return;
             
             try {
-                const response = await fetch(`/api/wireproxy/${action}`, { 
+                const response = await fetch(`/api/gost/${action}`, { 
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -581,7 +581,7 @@
             if (!confirm(`Are you sure you want to ${action} Wireproxy ${instance}?`)) return;
             
             try {
-                const response = await fetch(`/api/wireproxy/${instance}/${action}`, { 
+                const response = await fetch(`/api/gost/${instance}/${action}`, { 
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -628,49 +628,32 @@
             currentInstance = instance;
             
             try {
-                const response = await fetch(`/api/wireproxy/config/${instance}`);
+                const response = await fetch(`/api/gost/config/${instance}`);
                 const data = await response.json();
                 
                 if (data.success) {
                     const config = data.config;
                     const formHtml = `
                         <div id="config-alert"></div>
-                        <h3>Interface</h3>
+                        <h3>Gost Configuration</h3>
                         <div class="config-field">
-                            <label>Private Key:</label>
-                            <input type="text" id="privatekey" value="${config.interface.PrivateKey || ''}" />
+                            <label>Provider:</label>
+                            <select id="provider">
+                                <option value="nordvpn" ${config.provider === 'nordvpn' ? 'selected' : ''}>NordVPN</option>
+                                <option value="protonvpn" ${config.provider === 'protonvpn' ? 'selected' : ''}>ProtonVPN</option>
+                            </select>
                         </div>
                         <div class="config-field">
-                            <label>Address:</label>
-                            <input type="text" id="address" value="${config.interface.Address || ''}" />
+                            <label>Country/Server:</label>
+                            <input type="text" id="country" value="${config.country || ''}" placeholder="e.g., node-uk-29.protonvpn.net" />
                         </div>
                         <div class="config-field">
-                            <label>DNS:</label>
-                            <input type="text" id="dns" value="${config.interface.DNS || ''}" />
-                        </div>
-                        
-                        <h3>Peer</h3>
-                        <div class="config-field">
-                            <label>Public Key:</label>
-                            <input type="text" id="publickey" value="${config.peer.PublicKey || ''}" />
+                            <label>Proxy URL:</label>
+                            <input type="text" id="proxy_url" value="${config.proxy_url || ''}" placeholder="https://user:pass@domain:port" />
                         </div>
                         <div class="config-field">
-                            <label>Endpoint (IP:Port):</label>
-                            <input type="text" id="endpoint" value="${config.peer.Endpoint || ''}" placeholder="1.2.3.4:51820" />
-                        </div>
-                        <div class="config-field">
-                            <label>Allowed IPs:</label>
-                            <input type="text" id="allowedips" value="${config.peer.AllowedIPs || ''}" />
-                        </div>
-                        <div class="config-field">
-                            <label>Persistent Keepalive:</label>
-                            <input type="text" id="keepalive" value="${config.peer.PersistentKeepalive || ''}" />
-                        </div>
-                        
-                        <h3>SOCKS5</h3>
-                        <div class="config-field">
-                            <label>Bind Address:</label>
-                            <input type="text" id="bindaddress" value="${config.socks5.BindAddress || ''}" />
+                            <label>Port:</label>
+                            <input type="text" id="port" value="${config.port || ''}" readonly />
                         </div>
                         
                         <div class="btn-group">
@@ -696,25 +679,15 @@
         
         async function saveConfig() {
             const config = {
-                interface: {
-                    PrivateKey: document.getElementById('privatekey').value,
-                    Address: document.getElementById('address').value,
-                    DNS: document.getElementById('dns').value
-                },
-                peer: {
-                    PublicKey: document.getElementById('publickey').value,
-                    Endpoint: document.getElementById('endpoint').value,
-                    AllowedIPs: document.getElementById('allowedips').value,
-                    PersistentKeepalive: document.getElementById('keepalive').value
-                },
-                socks5: {
-                    BindAddress: document.getElementById('bindaddress').value
-                }
+                provider: document.getElementById('provider').value,
+                country: document.getElementById('country').value,
+                proxy_url: document.getElementById('proxy_url').value,
+                port: document.getElementById('port').value
             };
             
             try {
                 // Save config
-                const saveResponse = await fetch(`/api/wireproxy/config/${currentInstance}`, {
+                const saveResponse = await fetch(`/api/gost/config/${currentInstance}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ config })
@@ -730,7 +703,7 @@
                 
                 // Restart only the specific wireproxy instance
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                const restartResponse = await fetch(`/api/wireproxy/${currentInstance}/restart`, { method: 'POST' });
+                const restartResponse = await fetch(`/api/gost/${currentInstance}/restart`, { method: 'POST' });
                 const restartData = await restartResponse.json();
                 
                 if (restartData.success) {
@@ -1003,7 +976,19 @@
                         const loadPercent = server.load || 0;
                         const loadEmoji = loadPercent < 50 ? '🟢' : loadPercent < 75 ? '🟡' : '🔴';
                         
-                        option.textContent = `${tierBadge} ${server.name} - ${server.city || 'N/A'} ${loadEmoji} ${loadPercent}%`;
+                        // Lấy label và tính port
+                        let labelInfo = '';
+                        let portInfo = '';
+                        if (server.servers && server.servers.length > 0) {
+                            const firstServer = server.servers[0];
+                            if (firstServer.label) {
+                                const port = 4443 + parseInt(firstServer.label);
+                                labelInfo = `Label: ${firstServer.label}`;
+                                portInfo = `Port: ${port}`;
+                            }
+                        }
+                        
+                        option.textContent = `${tierBadge} ${server.name} - ${server.city || 'N/A'} ${loadEmoji} ${loadPercent}% ${labelInfo ? `(${labelInfo}, ${portInfo})` : ''}`;
                         option.dataset.serverData = JSON.stringify(server);
                         serverSelect.appendChild(option);
                     });
@@ -1031,6 +1016,18 @@
             const loadPercent = server.load || 0;
             const loadColor = loadPercent < 50 ? '#28a745' : loadPercent < 75 ? '#ffc107' : '#dc3545';
             
+            // Lấy label và tính port
+            let labelInfo = '';
+            let portInfo = '';
+            if (server.servers && server.servers.length > 0) {
+                const firstServer = server.servers[0];
+                if (firstServer.label) {
+                    const port = 4443 + parseInt(firstServer.label);
+                    labelInfo = firstServer.label;
+                    portInfo = port;
+                }
+            }
+            
             const infoHtml = `
                 <div style="font-size: 0.9em; color: #333;">
                     <div style="margin-bottom: 5px;"><strong>Name:</strong> ${server.name}</div>
@@ -1042,6 +1039,8 @@
                     <div style="margin-bottom: 5px;"><strong>Score:</strong> ${server.score ? server.score.toFixed(2) : 'N/A'}</div>
                     <div style="margin-bottom: 5px;"><strong>Entry IP:</strong> ${server.entry_ip || 'N/A'}</div>
                     <div style="margin-bottom: 5px;"><strong>Domain:</strong> ${server.domain || 'N/A'}</div>
+                    ${labelInfo ? `<div style="margin-bottom: 5px;"><strong>Label:</strong> <span style="background: #e3f2fd; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${labelInfo}</span></div>` : ''}
+                    ${portInfo ? `<div style="margin-bottom: 5px;"><strong>Proxy Port:</strong> <span style="background: #f3e5f5; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${portInfo}</span> <small style="color: #666;">(4443 + ${labelInfo})</small></div>` : ''}
                     <div style="margin-bottom: 5px;"><strong>Public Key:</strong> <code style="font-size: 0.85em; background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">${server.public_key || 'N/A'}</code></div>
                 </div>
             `;
@@ -1218,7 +1217,7 @@
             }
             
             try {
-                const response = await fetch(`/api/wireproxy/delete/${instance}`, {
+                const response = await fetch(`/api/gost/delete/${instance}`, {
                     method: 'DELETE'
                 });
                 
