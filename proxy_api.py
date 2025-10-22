@@ -57,10 +57,32 @@ class ProxyAPI:
             print(f"Error getting ProtonVPN proxy: {e}")
             return None
     
+    def get_protonvpn_proxy_with_port(self, country: str, port: int) -> Optional[str]:
+        """
+        Lấy thông tin proxy ProtonVPN với port cụ thể
+        Gọi API http://localhost:5267/mmo/getpassproxy để lấy user:pass
+        Sử dụng port được truyền vào thay vì tính từ server label
+        """
+        try:
+            # Gọi API để lấy user:pass
+            response = requests.get("http://localhost:5267/mmo/getpassproxy", timeout=10)
+            if response.status_code == 200:
+                user_pass = response.text.strip()
+                
+                # Tạo proxy URL với port cụ thể
+                proxy_url = f"https://{user_pass}@{country}:{port}"
+                return proxy_url
+            else:
+                print(f"Failed to get ProtonVPN credentials: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting ProtonVPN proxy: {e}")
+            return None
+    
     def _extract_server_label(self, country: str) -> int:
         """
         Trích xuất server label từ country string bằng cách tìm trong cache
-        VD: 'node-uk-29.protonvpn.net' -> 6 (từ cache)
+        VD: 'node-fr-16.protonvpn.net' -> 6 (từ cache)
         """
         if not country:
             return 8  # Default
@@ -73,20 +95,34 @@ class ProxyAPI:
                     data = json.load(f)
                     # Cache file là array, không phải object
                     if isinstance(data, list):
-                        # Ưu tiên lấy label "6" nếu có, nếu không thì lấy label đầu tiên
-                        # Tìm tất cả server có domain đúng và label "6"
+                        # Tìm tất cả server có domain đúng
+                        matching_servers = []
                         for server in data:
-                            if server.get('domain') == country and 'servers' in server:
-                                for sub_server in server['servers']:
-                                    if sub_server.get('domain') == country and sub_server.get('label') == '6':
-                                        return int(sub_server.get('label', 8))
+                            if server.get('domain') == country:
+                                # Tìm trong servers array
+                                if 'servers' in server and isinstance(server['servers'], list):
+                                    for sub_server in server['servers']:
+                                        if sub_server.get('domain') == country:
+                                            label = sub_server.get('label')
+                                            if label and label != '':
+                                                try:
+                                                    label_int = int(label)
+                                                    # Lưu server với load và score để chọn server tốt nhất
+                                                    load = server.get('load', 100)
+                                                    score = server.get('score', 0)
+                                                    matching_servers.append({
+                                                        'label': label_int,
+                                                        'load': load,
+                                                        'score': score
+                                                    })
+                                                except ValueError:
+                                                    continue
                         
-                        # Fallback: lấy label đầu tiên
-                        for server in data:
-                            if server.get('domain') == country and 'servers' in server:
-                                for sub_server in server['servers']:
-                                    if sub_server.get('domain') == country:
-                                        return int(sub_server.get('label', 8))
+                        # Chọn server có load thấp nhất hoặc score cao nhất
+                        if matching_servers:
+                            # Sắp xếp theo load thấp nhất, nếu load bằng nhau thì theo score cao nhất
+                            matching_servers.sort(key=lambda x: (x['load'], -x['score']))
+                            return matching_servers[0]['label']
         except Exception as e:
             print(f"Error reading cache: {e}")
         
@@ -95,8 +131,8 @@ class ProxyAPI:
         if numbers:
             return int(numbers[0])
         
-        # Fallback: tính từ hash của country
-        return hash(country) % 100 + 1
+        # Fallback: tính từ hash của country để đảm bảo mỗi server có port khác nhau
+        return (hash(country) % 50) + 1  # Port từ 1-50
     
     def get_proxy_for_provider(self, provider: str, country: str = None) -> Optional[str]:
         """

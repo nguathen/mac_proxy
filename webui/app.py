@@ -82,23 +82,27 @@ def run_command(cmd, cwd=BASE_DIR):
             'returncode': -1
         }
 
-def parse_gost_config(instance):
-    """Parse gost config for instance"""
-    # Gost instances configuration
-    gost_instances = {
-        1: "18181", 2: "18182", 3: "18183", 4: "18184",
-        5: "18185", 6: "18186", 7: "18187"
-    }
-    
-    if instance not in gost_instances:
+def get_gost_ports():
+    """Get list of valid gost ports"""
+    return ["18181", "18182", "18183", "18184", "18185", "18186", "18187"]
+
+def is_valid_gost_port(port):
+    """Check if port is a valid gost port"""
+    return port in get_gost_ports()
+
+def parse_gost_config(port):
+    """Parse gost config for port"""
+    if not is_valid_gost_port(port):
         return None
     
-    port = gost_instances[instance]
+    # Get instance number from port for file naming
+    gost_ports = get_gost_ports()
+    instance = gost_ports.index(port) + 1
+    
     config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
     
     # Default config
     config = {
-        'instance': instance,
         'port': port,
         'proxy_url': '',
         'provider': 'protonvpn',
@@ -111,34 +115,106 @@ def parse_gost_config(instance):
             with open(config_file, 'r') as f:
                 saved_config = json.load(f)
                 config.update(saved_config)
+                # Port trả về là port của proxy server (từ proxy_url hoặc port field)
+                if 'port' in saved_config and saved_config['port']:
+                    config['port'] = saved_config['port']
+                elif 'proxy_url' in saved_config and saved_config['proxy_url']:
+                    # Trích xuất port từ proxy_url
+                    import re
+                    proxy_url = saved_config['proxy_url']
+                    port_match = re.search(r':(\d+)$', proxy_url)
+                    if port_match:
+                        config['port'] = port_match.group(1)
         except Exception:
             pass
     
     return config
 
-def save_gost_config(instance, config):
-    """Save gost config for instance"""
+def save_gost_config(port, config):
+    """Save gost config for port"""
     try:
+        if not is_valid_gost_port(port):
+            return False
+            
         provider = config.get('provider', 'protonvpn')
         country = config.get('country', '')
         
         if not provider or not country:
             return False
         
-        # Sử dụng manage_gost.sh để cấu hình
-        result = run_command(f'bash manage_gost.sh config {instance} {provider} "{country}"')
+        # Get instance number from port for manage_gost.sh
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
         
-        if result['success']:
-            # Cập nhật config object với thông tin mới
-            if provider == 'protonvpn':
-                config['proxy_url'] = proxy_api.get_protonvpn_proxy(country)
-            elif provider == 'nordvpn':
-                config['proxy_url'] = proxy_api.get_nordvpn_proxy(country)
+        # Lưu config trực tiếp vào file
+        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+        
+        # Thêm thông tin cần thiết vào config
+        config['instance'] = instance
+        config['created_at'] = datetime.now().isoformat() + 'Z'
+        
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=4)
             return True
-        else:
+        except Exception as e:
+            print(f"⚠️  Error saving config: {e}")
             return False
     except Exception as e:
         return False
+
+def get_random_server_for_port(port, provider='protonvpn'):
+    """Get a random server for specific port to ensure different servers"""
+    try:
+        import random
+        import time
+        
+        # Get instance number from port for seeding
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
+        
+        # Add port-specific seed to ensure different servers
+        random.seed(int(time.time() * 1000) + instance)
+        
+        if provider == 'protonvpn':
+            servers = protonvpn_api.fetch_servers() if protonvpn_api else []
+            if servers:
+                random.shuffle(servers)
+                selected_server = servers[instance % len(servers)]
+                return selected_server.get('domain', selected_server.get('name', ''))
+        elif provider == 'nordvpn':
+            servers = nordvpn_api.fetch_servers() if nordvpn_api else []
+            if servers:
+                random.shuffle(servers)
+                selected_server = servers[instance % len(servers)]
+                return selected_server.get('hostname', selected_server.get('name', ''))
+        
+        return None
+    except Exception as e:
+        print(f"⚠️  Error getting random server for port {port}: {e}")
+        return None
+
+def get_protonvpn_proxy_with_server(server):
+    """Get ProtonVPN proxy URL with correct port based on server label"""
+    try:
+        # Calculate port based on server label
+        # Get label from servers array
+        server_label = '0'  # Default
+        if server.get('servers') and len(server['servers']) > 0:
+            server_label = server['servers'][0].get('label', '0')
+        
+        try:
+            server_label_int = int(server_label)
+        except (ValueError, TypeError):
+            server_label_int = 0  # Fallback to 0
+        
+        protonvpn_port = server_label_int + 4443
+        
+        # Get proxy URL with correct port
+        return proxy_api.get_protonvpn_proxy_with_port(server.get('domain', server.get('name', '')), protonvpn_port)
+    except Exception as e:
+        print(f"⚠️  Error getting ProtonVPN proxy with server: {e}")
+        return None
 
 def trigger_health_check():
     """Trigger HAProxy health monitors to check immediately by creating trigger file"""
@@ -170,8 +246,11 @@ def api_status():
     
     # Check gost instances - include instances that have been created or are running
     gost_instances = {}
-    for instance in range(1, 8):
-        port = f"1818{instance}"
+    for port in get_gost_ports():
+        # Get instance number from port for file naming
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
+        
         config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
         pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
         
@@ -180,11 +259,11 @@ def api_status():
         if (os.path.exists(config_file) or 
             os.path.exists(pid_file) or 
             run_command(f'lsof -ti :{port}')['success']):
-            gost_instances[instance] = port
+            gost_instances[port] = instance
     
     # Check status for each gost instance in parallel to avoid blocking
-    def _probe_gost(instance_port):
-        instance, port = instance_port
+    def _probe_gost(port_instance):
+        port, instance = port_instance
         pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
         running = False
         pid = None
@@ -229,7 +308,7 @@ def api_status():
             connection_ok = bool(result['success'] and result['stdout'].strip())
         
         return {
-            'name': f'Gost {instance}',
+            'name': f'Port {port}',
             'port': port,
             'running': running,
             'pid': pid,
@@ -306,39 +385,39 @@ def api_status():
     
     return jsonify(status)
 
-@app.route('/api/gost/config/<int:instance>')
-def api_get_gost_config(instance):
-    """Lấy config gost"""
-    # Validate instance
-    if instance < 1 or instance > 7:
+@app.route('/api/gost/config/<port>')
+def api_get_gost_config(port):
+    """Lấy config gost theo port"""
+    # Validate port
+    if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-7'
+            'error': f'Invalid port. Available ports: 18181-18187'
         }), 400
     
-    config = parse_gost_config(instance)
+    config = parse_gost_config(port)
     if config:
         return jsonify({'success': True, 'config': config})
     else:
         return jsonify({'success': False, 'error': 'Cannot read config'}), 500
 
-@app.route('/api/gost/config/<int:instance>', methods=['POST'])
-def api_save_gost_config(instance):
-    """Lưu config gost"""
+@app.route('/api/gost/config/<port>', methods=['POST'])
+def api_save_gost_config(port):
+    """Lưu config gost theo port"""
     data = request.json
     
-    # Validate instance
-    if instance < 1 or instance > 7:
+    # Validate port
+    if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-7'
+            'error': f'Invalid port. Available ports: 18181-18187'
         }), 400
     
     config = data.get('config')
     if not config:
         return jsonify({'success': False, 'error': 'No config provided'}), 400
     
-    if save_gost_config(instance, config):
+    if save_gost_config(port, config):
         return jsonify({'success': True, 'message': 'Config saved successfully'})
     else:
         return jsonify({'success': False, 'error': 'Cannot save config'}), 500
@@ -357,25 +436,22 @@ def api_gost_action(action):
         'error': result['stderr']
     })
 
-@app.route('/api/gost/<int:instance>/<action>', methods=['POST'])
-def api_gost_instance_action(instance, action):
-    """Điều khiển từng gost instance riêng lẻ"""
+@app.route('/api/gost/<port>/<action>', methods=['POST'])
+def api_gost_port_action(port, action):
+    """Điều khiển gost theo port"""
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': 'Invalid action'}), 400
     
-    # Validate instance
-    if instance < 1 or instance > 7:
+    # Validate port
+    if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
         return jsonify({
             'success': False, 
-            'error': f'Invalid instance. Available instances: 1-7'
+            'error': f'Invalid port. Available ports: 18181-18187'
         }), 400
     
-    # Get port for this instance
-    gost_instances = {
-        1: "18181", 2: "18182", 3: "18183", 4: "18184",
-        5: "18185", 6: "18186", 7: "18187"
-    }
-    port = gost_instances[instance]
+    # Get instance number from port for file naming
+    gost_ports = get_gost_ports()
+    instance = gost_ports.index(port) + 1
     pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
     
     if action == 'stop':
@@ -391,7 +467,7 @@ def api_gost_instance_action(instance, action):
                     pass
                 return jsonify({
                     'success': True,
-                    'message': f'Gost {instance} stopped successfully'
+                    'message': f'Gost on port {port} stopped successfully'
                 })
             except (OSError, ValueError) as e:
                 return jsonify({
@@ -425,8 +501,54 @@ def api_gost_instance_action(instance, action):
         run_command(f'lsof -ti :{port} | xargs -r kill -9 2>/dev/null || true')
         
         # Get proxy URL from config
-        config = parse_gost_config(instance)
-        proxy_url = config.get('proxy_url', 'https://user:pass@az-01.protonvpn.net:4465') if config else 'https://user:pass@az-01.protonvpn.net:4465'
+        config = parse_gost_config(port)
+        proxy_url = config.get('proxy_url', '') if config else ''
+        
+        # If no proxy URL or empty, try to create random config
+        if not proxy_url or proxy_url == '':
+            try:
+                import random
+                # Try ProtonVPN first
+                servers = protonvpn_api.fetch_servers() if protonvpn_api else []
+                if servers:
+                    selected_server = random.choice(servers)
+                    server_name = selected_server.get('domain', selected_server.get('name', ''))
+                    proxy_url = proxy_api.get_protonvpn_proxy(server_name)
+                    
+                    # Save the random config
+                    if proxy_url:
+                        random_config = {
+                            'provider': 'protonvpn',
+                            'country': server_name,
+                            'proxy_url': proxy_url
+                        }
+                        save_gost_config(port, random_config)
+                        print(f"✅ Created random ProtonVPN config for gost {instance}: {server_name}")
+                
+                # If ProtonVPN failed, try NordVPN
+                if not proxy_url:
+                    servers = nordvpn_api.fetch_servers() if nordvpn_api else []
+                    if servers:
+                        selected_server = random.choice(servers)
+                        server_name = selected_server.get('hostname', selected_server.get('name', ''))
+                        proxy_url = proxy_api.get_nordvpn_proxy(server_name)
+                        
+                        # Save the random config
+                        if proxy_url:
+                            random_config = {
+                                'provider': 'nordvpn',
+                                'country': server_name,
+                                'proxy_url': proxy_url
+                            }
+                            save_gost_config(port, random_config)
+                            print(f"✅ Created random NordVPN config for gost {instance}: {server_name}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to create random config for gost {instance}: {e}")
+        
+        # Fallback to default if still no proxy URL
+        if not proxy_url:
+            proxy_url = 'https://user:pass@az-01.protonvpn.net:4465'
         
         # Start gost
         log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
@@ -478,7 +600,53 @@ def api_gost_instance_action(instance, action):
         
         # Get proxy URL from config
         config = parse_gost_config(instance)
-        proxy_url = config.get('proxy_url', 'https://user:pass@az-01.protonvpn.net:4465') if config else 'https://user:pass@az-01.protonvpn.net:4465'
+        proxy_url = config.get('proxy_url', '') if config else ''
+        
+        # If no proxy URL or empty, try to create random config
+        if not proxy_url or proxy_url == '':
+            try:
+                import random
+                # Try ProtonVPN first
+                servers = protonvpn_api.fetch_servers() if protonvpn_api else []
+                if servers:
+                    selected_server = random.choice(servers)
+                    server_name = selected_server.get('domain', selected_server.get('name', ''))
+                    proxy_url = proxy_api.get_protonvpn_proxy(server_name)
+                    
+                    # Save the random config
+                    if proxy_url:
+                        random_config = {
+                            'provider': 'protonvpn',
+                            'country': server_name,
+                            'proxy_url': proxy_url
+                        }
+                        save_gost_config(port, random_config)
+                        print(f"✅ Created random ProtonVPN config for gost {instance}: {server_name}")
+                
+                # If ProtonVPN failed, try NordVPN
+                if not proxy_url:
+                    servers = nordvpn_api.fetch_servers() if nordvpn_api else []
+                    if servers:
+                        selected_server = random.choice(servers)
+                        server_name = selected_server.get('hostname', selected_server.get('name', ''))
+                        proxy_url = proxy_api.get_nordvpn_proxy(server_name)
+                        
+                        # Save the random config
+                        if proxy_url:
+                            random_config = {
+                                'provider': 'nordvpn',
+                                'country': server_name,
+                                'proxy_url': proxy_url
+                            }
+                            save_gost_config(port, random_config)
+                            print(f"✅ Created random NordVPN config for gost {instance}: {server_name}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to create random config for gost {instance}: {e}")
+        
+        # Fallback to default if still no proxy URL
+        if not proxy_url:
+            proxy_url = 'https://user:pass@az-01.protonvpn.net:4465'
         
         # Start gost
         log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
@@ -711,18 +879,80 @@ listen stats_{sock_port}
         with open(config_file, 'w') as f:
             f.write(config_content)
         
+        # Calculate corresponding gost port
+        # HAProxy port 7891 -> Gost port 18181
+        # HAProxy port 7892 -> Gost port 18182
+        # Formula: gost_port = 18181 + (haproxy_port - 7891)
+        gost_port = 18181 + (sock_port - 7891)
+        
+        # Create gost config with random server if no specific country
+        gost_config_created = False
+        if 18181 <= gost_port <= 18999:  # Valid gost port range
+            try:
+                # Try to get random server from ProtonVPN first
+                import random
+                servers = protonvpn_api.fetch_servers() if protonvpn_api else []
+                if servers:
+                    selected_server = random.choice(servers)
+                    server_name = selected_server.get('domain', selected_server.get('name', ''))
+                    
+                    # Create gost config
+                    config = {
+                        'provider': 'protonvpn',
+                        'country': server_name,
+                        'proxy_url': proxy_api.get_protonvpn_proxy(server_name)  # Random server, use old method
+                    }
+                    
+                    if save_gost_config(str(gost_port), config):
+                        gost_config_created = True
+                        print(f"✅ Created gost config for port {gost_port} with random ProtonVPN server: {server_name}")
+                
+                # If ProtonVPN failed, try NordVPN
+                if not gost_config_created:
+                    servers = nordvpn_api.fetch_servers() if nordvpn_api else []
+                    if servers:
+                        selected_server = random.choice(servers)
+                        server_name = selected_server.get('hostname', selected_server.get('name', ''))
+                        
+                        # Create gost config
+                        config = {
+                            'provider': 'nordvpn',
+                            'country': server_name,
+                            'proxy_url': proxy_api.get_nordvpn_proxy(server_name)
+                        }
+                        
+                        if save_gost_config(str(gost_port), config):
+                            gost_config_created = True
+                            print(f"✅ Created gost config for port {gost_port} with random NordVPN server: {server_name}")
+                
+            except Exception as e:
+                print(f"⚠️  Failed to create gost config: {e}")
+        
         # Start the HAProxy instance using setup_haproxy.sh in background
         wg_ports_str = ','.join(map(str, wg_ports)) if wg_ports else '18181'
         log_file = os.path.join(LOG_DIR, f'haproxy_health_{sock_port}.log')
         
         # Run setup_haproxy.sh in background using nohup
-        cmd = f'nohup bash setup_haproxy.sh --sock-port {sock_port} --stats-port {stats_port} --wg-ports {wg_ports_str} --daemon > {log_file} 2>&1 &'
+        cmd = f'nohup bash setup_haproxy.sh --sock-port {sock_port} --stats-port {stats_port} --gost-ports {wg_ports_str} --daemon > {log_file} 2>&1 &'
         result = run_command(cmd)
         
         if result['success'] or result['returncode'] == 0:
             # Give it a moment to start
             import time
             time.sleep(2)
+            
+            # Start gost service if config was created
+            if gost_config_created and 18181 <= gost_port <= 18999:
+                try:
+                    # Start gost service using manage_gost.sh
+                    gost_cmd = f'./manage_gost.sh start'
+                    gost_result = run_command(gost_cmd)
+                    if gost_result['success']:
+                        print(f"✅ Started gost service on port {gost_port}")
+                    else:
+                        print(f"⚠️  Failed to start gost service on port {gost_port}: {gost_result.get('stderr', 'Unknown error')}")
+                except Exception as e:
+                    print(f"⚠️  Error starting gost service on port {gost_port}: {e}")
             
             # Verify HAProxy started
             pid_file = os.path.join(LOG_DIR, f'haproxy_{sock_port}.pid')
@@ -732,13 +962,18 @@ listen stats_{sock_port}
                         pid = int(f.read().strip())
                     os.kill(pid, 0)  # Check if process exists
                     
+                    message = f'HAProxy service created on port {sock_port}'
+                    if gost_config_created:
+                        message += f' with gost service on port {gost_port}'
+                    
                     return jsonify({
                         'success': True,
-                        'message': f'HAProxy service created on port {sock_port}',
+                        'message': message,
                         'service': {
                             'sock_port': sock_port,
                             'stats_port': stats_port,
-                            'wg_ports': wg_ports
+                            'wg_ports': wg_ports,
+                            'gost_port': gost_port if gost_config_created else None
                         }
                     })
                 except (OSError, ValueError):
@@ -825,23 +1060,20 @@ def api_haproxy_delete(port):
             'error': str(e)
         }), 500
 
-@app.route('/api/gost/delete/<int:instance>', methods=['DELETE'])
-def api_gost_delete(instance):
-    """Xóa Gost instance"""
+@app.route('/api/gost/delete/<port>', methods=['DELETE'])
+def api_gost_delete(port):
+    """Xóa Gost theo port"""
     try:
-        # Validate instance
-        if instance < 1 or instance > 7:
+        # Validate port
+        if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-7'
+                'error': f'Invalid port. Available ports: 18181-18187'
             }), 400
         
-        # Get port for this instance
-        gost_instances = {
-            1: "18181", 2: "18182", 3: "18183", 4: "18184",
-            5: "18185", 6: "18186", 7: "18187"
-        }
-        port = gost_instances[instance]
+        # Get instance for this port
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
         
         # Stop the service first if running
         pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
@@ -916,11 +1148,11 @@ def api_get_logs(service):
         # Extract port number from service name (e.g., wireproxy18183 -> 18183)
         port = service.replace('wireproxy', '')
         # Map port to instance number for new format
-        port_to_instance = {
-            '18181': '1', '18182': '2', '18183': '3', 
-            '18184': '4', '18185': '5', '18186': '6'
-        }
-        instance = port_to_instance.get(port, port)
+        gost_ports = get_gost_ports()
+        if port in gost_ports:
+            instance = gost_ports.index(port) + 1
+        else:
+            instance = port
         new_log_file = f'wireproxy{instance}.log'
         old_log_file = f'wireproxy_{port}.log'
         
@@ -940,14 +1172,17 @@ def api_get_logs(service):
             log_file = old_log_file
         else:
             log_file = new_log_file  # Default to new format
-    # Check for haproxy logs (haproxy1, haproxy2, ...)
+    # Check for haproxy logs (haproxy1, haproxy2, ... or haproxy7891, haproxy7892, ...)
     elif service.startswith('haproxy'):
-        # Extract instance number
-        instance_num = service.replace('haproxy', '')
-        if instance_num.isdigit():
-            # Map to port-based log file
-            port_map = {'1': '7891', '2': '7892', '3': '7893', '4': '7894', '5': '7895'}
-            port = port_map.get(instance_num, f'789{instance_num}')
+        # Extract port or instance number
+        port_or_instance = service.replace('haproxy', '')
+        if port_or_instance.isdigit():
+            # Check if it's a port (4 digits) or instance (1-2 digits)
+            if len(port_or_instance) >= 4:  # Port like 7891, 7892, 7893
+                port = port_or_instance
+            else:  # Instance like 1, 2, 3
+                port_map = {'1': '7891', '2': '7892', '3': '7893', '4': '7894', '5': '7895'}
+                port = port_map.get(port_or_instance, f'789{port_or_instance}')
             log_file = f'haproxy_health_{port}.log'
     # Check for HTTPS proxy logs
     
@@ -986,6 +1221,36 @@ def api_test_proxy(port):
             'success': False,
             'error': result['stderr'] or 'Connection failed'
         })
+
+@app.route('/api/gost/reset-configs', methods=['POST'])
+def api_reset_gost_configs():
+    """Reset all gost configs to force different random servers"""
+    try:
+        import os
+        import glob
+        
+        # Remove all gost config files
+        config_files = glob.glob(os.path.join(LOG_DIR, 'gost*.config'))
+        removed_count = 0
+        
+        for config_file in config_files:
+            try:
+                os.remove(config_file)
+                removed_count += 1
+            except Exception as e:
+                print(f"⚠️  Failed to remove {config_file}: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reset {removed_count} gost config files. Restart gost instances to get new random servers.',
+            'removed_count': removed_count
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/nordvpn/servers')
 def api_nordvpn_servers():
@@ -1061,9 +1326,9 @@ def api_nordvpn_best_server():
             'error': str(e)
         }), 500
 
-@app.route('/api/nordvpn/apply/<int:instance>', methods=['POST'])
-def api_nordvpn_apply_server(instance):
-    """Áp dụng server NordVPN vào gost instance"""
+@app.route('/api/nordvpn/apply/<port>', methods=['POST'])
+def api_nordvpn_apply_server(port):
+    """Áp dụng server NordVPN vào gost port"""
     try:
         data = request.json
         server_name = data.get('server_name')
@@ -1076,17 +1341,16 @@ def api_nordvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Validate instance
-        if instance < 1 or instance > 7:
+        # Validate port
+        if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-7'
+                'error': f'Invalid port. Available ports: 18181-18187'
             }), 400
         
-        # Get gost port for this instance
-        gost_ports = {1: "18181", 2: "18182", 3: "18183", 4: "18184", 
-                      5: "18185", 6: "18186", 7: "18187"}
-        port = gost_ports[instance]
+        # Get instance for this port
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
         
         # Get proxy URL for NordVPN server
         proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
@@ -1103,14 +1367,14 @@ def api_nordvpn_apply_server(instance):
             'proxy_url': proxy_url
         }
         
-        if not save_gost_config(instance, config):
+        if not save_gost_config(port, config):
             return jsonify({
                 'success': False,
                 'error': 'Failed to save gost config'
             }), 500
         
         # Restart gost instance using manage_gost.sh
-        cmd = f'./manage_gost.sh restart {instance}'
+        cmd = f'./manage_gost.sh restart-port {port}'
         result = run_command(cmd)
         
         if result['success']:
@@ -1236,9 +1500,9 @@ def api_protonvpn_best_server():
         }), 500
 
 
-@app.route('/api/protonvpn/apply/<int:instance>', methods=['POST'])
-def api_protonvpn_apply_server(instance):
-    """Áp dụng ProtonVPN server vào gost instance"""
+@app.route('/api/protonvpn/apply/<port>', methods=['POST'])
+def api_protonvpn_apply_server(port):
+    """Áp dụng ProtonVPN server vào gost port"""
     try:
         if not protonvpn_api:
             return jsonify({'success': False, 'error': 'ProtonVPN API not configured'}), 400
@@ -1254,20 +1518,32 @@ def api_protonvpn_apply_server(instance):
         if not server:
             return jsonify({'success': False, 'error': 'Server not found'}), 404
         
-        # Validate instance
-        if instance < 1 or instance > 7:
+        # Validate port
+        if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid instance. Available instances: 1-7'
+                'error': f'Invalid port. Available ports: 18181-18187'
             }), 400
         
-        # Get gost port for this instance
-        gost_ports = {1: "18181", 2: "18182", 3: "18183", 4: "18184", 
-                      5: "18185", 6: "18186", 7: "18187"}
-        port = gost_ports[instance]
+        # Get instance for this port
+        gost_ports = get_gost_ports()
+        instance = gost_ports.index(port) + 1
         
-        # Get proxy URL for ProtonVPN server
-        proxy_url = proxy_api.get_protonvpn_proxy(server['domain'])
+        # Calculate ProtonVPN port based on server label
+        # Get label from servers array
+        server_label = '0'  # Default
+        if server.get('servers') and len(server['servers']) > 0:
+            server_label = server['servers'][0].get('label', '0')
+        
+        try:
+            server_label_int = int(server_label)
+        except (ValueError, TypeError):
+            server_label_int = 0  # Fallback to 0
+        
+        protonvpn_port = server_label_int + 4443
+        
+        # Get proxy URL for ProtonVPN server with correct port
+        proxy_url = proxy_api.get_protonvpn_proxy_with_port(server['domain'], protonvpn_port)
         if not proxy_url:
             return jsonify({
                 'success': False,
@@ -1278,17 +1554,18 @@ def api_protonvpn_apply_server(instance):
         config = {
             'provider': 'protonvpn',
             'country': server['domain'],
-            'proxy_url': proxy_url
+            'proxy_url': proxy_url,
+            'port': str(protonvpn_port)
         }
         
-        if not save_gost_config(instance, config):
+        if not save_gost_config(port, config):
             return jsonify({
                 'success': False,
                 'error': 'Failed to save gost config'
             }), 500
         
         # Restart gost instance using manage_gost.sh
-        cmd = f'./manage_gost.sh restart {instance}'
+        cmd = f'./manage_gost.sh restart-port {port}'
         result = run_command(cmd)
         
         if result['success']:
@@ -2160,13 +2437,12 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
             return {'success': False, 'error': f'Unknown VPN provider: {vpn_provider}'}
         
         # Create gost config
-        gost_instance = gost_port - 18180  # Convert port to instance number
         proxy_url = None
         
         if vpn_provider == 'nordvpn':
             proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
         elif vpn_provider == 'protonvpn':
-            proxy_url = proxy_api.get_protonvpn_proxy(server['name'])
+            proxy_url = get_protonvpn_proxy_with_server(server)
         
         if not proxy_url:
             return {'success': False, 'error': f'Failed to generate proxy URL for {vpn_provider} server'}
@@ -2178,14 +2454,14 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
             'proxy_url': proxy_url
         }
         
-        if not save_gost_config(gost_instance, config):
+        if not save_gost_config(str(gost_port), config):
             return {'success': False, 'error': 'Failed to save gost config'}
         
         # Start gost with verification and logging
         os.makedirs(LOG_DIR, exist_ok=True)
         
-        # Start gost instance using manage_gost.sh
-        cmd = f'./manage_gost.sh start {gost_instance}'
+        # Start gost service using manage_gost.sh
+        cmd = f'./manage_gost.sh start'
         result = run_command(cmd)
         
         if not result['success']:
@@ -2297,8 +2573,8 @@ listen stats_{port}
         if not result['success']:
             # Cleanup gost if HAProxy fails
             try:
-                # Stop gost instance
-                run_command(f'./manage_gost.sh stop {gost_instance}')
+                # Stop gost service
+                run_command(f'./manage_gost.sh stop')
             except Exception:
                 pass
             return {'success': False, 'error': f'Failed to start HAProxy: {result["stderr"]}'}
@@ -2317,7 +2593,6 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
         # Find associated gost
         haproxy_config_path = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
         gost_port = None
-        gost_instance = None
         
         if os.path.exists(haproxy_config_path):
             with open(haproxy_config_path, 'r') as f:
@@ -2326,7 +2601,6 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                 match = re.search(r'server\s+gost\d+\s+127\.0\.0\.1:(\d+)', content)
                 if match:
                     gost_port = int(match.group(1))
-                    gost_instance = gost_port - 18180  # Convert port to instance number
         
         # Stop existing HAProxy
         pid_file = os.path.join(BASE_DIR, 'logs', f'haproxy_{port}.pid')
@@ -2350,9 +2624,9 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                 pass
         
         # Stop and reconfigure gost if found
-        if gost_port and gost_instance:
-            # Stop gost instance
-            run_command(f'./manage_gost.sh stop {gost_instance}')
+        if gost_port:
+            # Stop gost service
+            run_command(f'./manage_gost.sh stop')
             
             # Wait for port to be released
             import time
@@ -2514,10 +2788,10 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
             
             # Get proxy URL for the server
             proxy_url = None
-            if vpn_provider == 'nordvpn':
-                proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
-            elif vpn_provider == 'protonvpn':
-                proxy_url = proxy_api.get_protonvpn_proxy(server['name'])
+        if vpn_provider == 'nordvpn':
+            proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
+        elif vpn_provider == 'protonvpn':
+            proxy_url = get_protonvpn_proxy_with_server(server)
             
             if not proxy_url:
                 return {'success': False, 'error': f'Failed to generate proxy URL for {vpn_provider} server'}
@@ -2529,15 +2803,15 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
                 'proxy_url': proxy_url
             }
             
-            if not save_gost_config(gost_instance, config):
+            if not save_gost_config(str(gost_port), config):
                 return {'success': False, 'error': 'Failed to save gost config'}
             
             # Gost config already saved above
             
             # Restart gost with verification
 
-            # Restart gost instance
-            cmd = f'./manage_gost.sh restart {gost_instance}'
+            # Restart gost service
+            cmd = f'./manage_gost.sh restart'
             result = run_command(cmd)
             
             if not result['success']:
@@ -2607,8 +2881,8 @@ if __name__ == '__main__':
     print(f"📂 Base Directory: {BASE_DIR}")
     print(f"📝 Log Directory: {LOG_DIR}")
     print(f"🔧 Config Files:")
-    print(f"   - Gost 1: {os.path.join(LOG_DIR, 'gost1.config')}")
-    print(f"   - Gost 2: {os.path.join(LOG_DIR, 'gost2.config')}")
+    print(f"   - Gost 18181: {os.path.join(LOG_DIR, 'gost_18181.config')}")
+    print(f"   - Gost 18182: {os.path.join(LOG_DIR, 'gost_18182.config')}")
     print("=" * 60)
     print("🚀 Starting Web UI on http://0.0.0.0:5000")
     print("=" * 60)

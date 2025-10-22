@@ -47,7 +47,7 @@ check_wireproxy() {
     return 1  # Wireproxy không chạy
 }
 
-# Function để khởi động instance
+# Function để khởi động service
 start_instance() {
     local sock_port=$1
     local stats_port=$2
@@ -55,7 +55,7 @@ start_instance() {
     
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🚀 Starting HAProxy Instance (Port $sock_port)"
+    echo "🚀 Starting HAProxy Service (Port $sock_port)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     chmod +x setup_haproxy.sh
@@ -71,34 +71,34 @@ start_instance() {
     sleep 2
 }
 
-# Kiểm tra wireproxy instances có sẵn
-echo "🔍 Checking available wireproxy instances..."
+# Dynamic discovery: Check gost config files and start corresponding HAProxy services
+echo "🔍 Checking available gost services..."
 
-# Kiểm tra wireproxy 18181
-if check_wireproxy 18181; then
-    echo "✅ Wireproxy 18181 is available"
-    if check_instance 7891; then
-        echo "✅ HAProxy 7891 already running"
-    else
-        echo "🔄 Starting HAProxy 7891 (for wireproxy 18181)..."
-        start_instance 7891 8091 18181
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        # Extract port from config file name
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        
+        # Calculate corresponding HAProxy port (gost_port - 10000)
+        haproxy_port=$((gost_port - 10000))
+        stats_port=$((haproxy_port + 200))
+        
+        echo "📋 Found gost config for port $gost_port, checking availability..."
+        
+        # Check if gost service is available (check if port is listening)
+        if check_wireproxy $gost_port; then
+            echo "✅ Gost $gost_port is available"
+            if check_instance $haproxy_port; then
+                echo "✅ HAProxy $haproxy_port already running"
+            else
+                echo "🔄 Starting HAProxy $haproxy_port (for gost $gost_port)..."
+                start_instance $haproxy_port $stats_port $gost_port
+            fi
+        else
+            echo "❌ Gost $gost_port not available (port not listening)"
+        fi
     fi
-else
-    echo "❌ Wireproxy 18181 not available"
-fi
-
-# Kiểm tra wireproxy 18182
-if check_wireproxy 18182; then
-    echo "✅ Wireproxy 18182 is available"
-    if check_instance 7892; then
-        echo "✅ HAProxy 7892 already running"
-    else
-        echo "🔄 Starting HAProxy 7892 (for wireproxy 18182)..."
-        start_instance 7892 8092 18182
-    fi
-else
-    echo "❌ Wireproxy 18182 not available"
-fi
+done
 
 # Hiển thị trạng thái cuối
 echo ""
@@ -108,22 +108,38 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "📊 Current Status:"
 
-# Kiểm tra trạng thái cuối cùng
-for port in 7891 7892; do
-    if check_instance "$port"; then
-        echo "   ✅ HAProxy $port: Running"
-    else
-        echo "   ❌ HAProxy $port: Not running"
+# Kiểm tra trạng thái cuối cùng dựa trên config files
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        
+        if check_instance "$haproxy_port"; then
+            echo "   ✅ HAProxy $haproxy_port: Running (gost $gost_port)"
+        else
+            echo "   ❌ HAProxy $haproxy_port: Not running (gost $gost_port)"
+        fi
     fi
 done
 
 echo ""
 echo "📈 HAProxy Stats:"
-echo "   • Instance 1: http://0.0.0.0:8091/haproxy?stats"
-echo "   • Instance 2: http://0.0.0.0:8092/haproxy?stats"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        stats_port=$((haproxy_port + 200))
+        echo "   • HAProxy $haproxy_port: http://0.0.0.0:$stats_port/haproxy?stats"
+    fi
+done
 echo "   • Auth: admin:admin123"
 echo ""
 echo "📝 Test Commands:"
-echo "   • Test 7891: curl -x socks5h://127.0.0.1:7891 https://api.ipify.org"
-echo "   • Test 7892: curl -x socks5h://127.0.0.1:7892 https://api.ipify.org"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        echo "   • Test $haproxy_port: curl -x socks5h://127.0.0.1:$haproxy_port https://api.ipify.org"
+    fi
+done
 echo ""

@@ -336,7 +336,7 @@
         <!-- NordVPN Management -->
         <div class="card">
             <h2>🌍 NordVPN Server Selection</h2>
-            <p style="color: #666; margin-bottom: 15px;">Chọn server NordVPN và áp dụng vào wireproxy instance</p>
+            <p style="color: #666; margin-bottom: 15px;">Chọn server NordVPN và áp dụng vào wireproxy port</p>
             
             <div class="config-field">
                 <label>Select Country:</label>
@@ -368,7 +368,7 @@
         <!-- ProtonVPN Management -->
         <div class="card">
             <h2>🔐 ProtonVPN Server Selection</h2>
-            <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào proxy instance</p>
+            <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào proxy port</p>
             <div style="background: #d1ecf1; border: 1px solid #0dcaf0; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em;">
                 ℹ️ <strong>Wireproxy:</strong> WireGuard tunnel (SOCKS5)<br>
                 ℹ️ <strong>HTTPS Proxy:</strong> Direct connection với domain (HTTP/HTTPS)
@@ -483,7 +483,7 @@
                 const response = await fetch('/api/status');
                 const data = await response.json();
                 
-                // Store current instances for VPN server selection
+                // Store current ports for VPN server selection
                 currentWireproxyInstances = data.gost;
                 
                 // Update VPN server selection buttons
@@ -491,7 +491,6 @@
                 
                 // Update Wireproxy status
                 const wireproxyHtml = data.gost.map((wp, idx) => {
-                    const instance = idx + 1;
                     return `
                     <div class="service-item">
                         <div class="service-header">
@@ -505,15 +504,15 @@
                         ${wp.running ? `<div class="service-info">Connection: ${wp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
                         ${wp.pid ? `<div class="service-info">PID: ${wp.pid}</div>` : ''}
                         <div class="btn-group">
-                            ${!wp.running ? `<button class="btn btn-success" onclick="controlWireproxyInstance(${instance}, 'start')">Start</button>` : ''}
-                            ${wp.running ? `<button class="btn btn-danger" onclick="controlWireproxyInstance(${instance}, 'stop')">Stop</button>` : ''}
-                            <button class="btn btn-warning" onclick="controlWireproxyInstance(${instance}, 'restart')">Restart</button>
+                            ${!wp.running ? `<button class="btn btn-success" onclick="controlWireproxyInstance('${wp.port}', 'start')">Start</button>` : ''}
+                            ${wp.running ? `<button class="btn btn-danger" onclick="controlWireproxyInstance('${wp.port}', 'stop')">Stop</button>` : ''}
+                            <button class="btn btn-warning" onclick="controlWireproxyInstance('${wp.port}', 'restart')">Restart</button>
                         </div>
                         <div class="btn-group" style="margin-top: 10px;">
                             <button class="btn btn-info" onclick="testProxy('${wp.port}')">Test</button>
-                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${instance}')">Logs</button>
-                            <button class="btn btn-primary" onclick="openConfigModal(${instance})">Config</button>
-                            ${!wp.running ? `<button class="btn btn-danger" onclick="deleteWireproxy(${instance}, '${wp.port}')">Delete</button>` : ''}
+                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${wp.port}')">Logs</button>
+                            <button class="btn btn-primary" onclick="openConfigModal('${wp.port}')">Config</button>
+                            ${!wp.running ? `<button class="btn btn-danger" onclick="deleteWireproxy('${wp.port}', '${wp.port}')">Delete</button>` : ''}
                         </div>
                     </div>
                 `}).join('');
@@ -536,7 +535,7 @@
                         ${hp.running ? `<a href="${hp.stats_url}" target="_blank" class="stats-link">📊 View Stats</a>` : ''}
                         <div class="btn-group">
                             <button class="btn btn-info" onclick="testProxy('${hp.port}')">Test</button>
-                            <button class="btn btn-primary" onclick="viewLogs('haproxy${hp.port === '7891' ? '1' : '2'}')">Logs</button>
+                            <button class="btn btn-primary" onclick="viewLogs('haproxy${hp.port}')">Logs</button>
                             <button class="btn btn-danger" onclick="deleteHAProxyService('${hp.port}')">Delete</button>
                         </div>
                     </div>
@@ -549,7 +548,7 @@
         }
         
         async function controlWireproxy(action) {
-            if (!confirm(`Are you sure you want to ${action} all wireproxy instances?`)) return;
+            if (!confirm(`Are you sure you want to ${action} all wireproxy ports?`)) return;
             
             try {
                 const response = await fetch(`/api/gost/${action}`, { 
@@ -577,11 +576,11 @@
             }
         }
         
-        async function controlWireproxyInstance(instance, action) {
-            if (!confirm(`Are you sure you want to ${action} Wireproxy ${instance}?`)) return;
+        async function controlWireproxyInstance(port, action) {
+            if (!confirm(`Are you sure you want to ${action} Wireproxy on port ${port}?`)) return;
             
             try {
-                const response = await fetch(`/api/gost/${instance}/${action}`, { 
+                const response = await fetch(`/api/gost/${port}/${action}`, { 
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -595,19 +594,19 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert(`${data.message || 'Wireproxy ' + instance + ' ' + action + ' successful!'}`);
+                    alert(`${data.message || 'Wireproxy ' + action + ' successful!'}`);
                     loadStatus();
                 } else {
                     alert(`Error: ${data.error}`);
                 }
             } catch (error) {
-                console.error('Wireproxy instance control error:', error);
+                console.error('Wireproxy control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
         
         async function controlHAProxy(action) {
-            if (!confirm(`Are you sure you want to ${action} all HAProxy instances?`)) return;
+            if (!confirm(`Are you sure you want to ${action} all HAProxy ports?`)) return;
             
             try {
                 const response = await fetch(`/api/haproxy/${action}`, { method: 'POST' });
@@ -624,11 +623,11 @@
             }
         }
         
-        async function openConfigModal(instance) {
-            currentInstance = instance;
+        async function openConfigModal(port) {
+            currentInstance = port;
             
             try {
-                const response = await fetch(`/api/gost/config/${instance}`);
+                const response = await fetch(`/api/gost/config/${port}`);
                 const data = await response.json();
                 
                 if (data.success) {
@@ -701,7 +700,7 @@
                 // Show success message
                 document.getElementById('config-alert').innerHTML = '<div class="alert alert-success">Config saved! Restarting wireproxy...</div>';
                 
-                // Restart only the specific wireproxy instance
+                // Restart only the specific wireproxy port
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const restartResponse = await fetch(`/api/gost/${currentInstance}/restart`, { method: 'POST' });
                 const restartData = await restartResponse.json();
@@ -760,15 +759,13 @@
         function updateVPNButtons() {
             // Update NordVPN buttons
             const nordvpnButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
-                const instance = idx + 1;
-                return `<button class="btn btn-success" onclick="applyNordVPNServer(${instance})">Apply to Wireproxy ${instance} (${wp.port})</button>`;
+                return `<button class="btn btn-success" onclick="applyNordVPNServer('${wp.port}')">Apply to Wireproxy Port ${wp.port}</button>`;
             }).join('');
             document.getElementById('nordvpn-apply-buttons').innerHTML = nordvpnButtonsHtml;
             
             // Update ProtonVPN Wireproxy buttons
             const protonWireproxyButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
-                const instance = idx + 1;
-                return `<button class="btn btn-success" onclick="applyProtonVPNServer(${instance}, 'wireproxy')">Apply to Wireproxy ${instance} (${wp.port})</button>`;
+                return `<button class="btn btn-success" onclick="applyProtonVPNServer('${wp.port}', 'wireproxy')">Apply to Wireproxy Port ${wp.port}</button>`;
             }).join('');
             document.getElementById('protonvpn-wireproxy-buttons').innerHTML = protonWireproxyButtonsHtml;
             
@@ -891,7 +888,7 @@
             document.getElementById('nordvpn-server-info').style.display = 'block';
         }
         
-        async function applyNordVPNServer(instance) {
+        async function applyNordVPNServer(port) {
             const serverSelect = document.getElementById('nordvpn-server');
             const serverName = serverSelect.value;
             
@@ -900,12 +897,12 @@
                 return;
             }
             
-            if (!confirm(`Apply NordVPN server "${serverName}" to Wireproxy ${instance}?\n\nThis will restart the wireproxy instance.`)) {
+            if (!confirm(`Apply NordVPN server "${serverName}" to Wireproxy port ${port}?\n\nThis will restart the wireproxy port.`)) {
                 return;
             }
             
             try {
-                const response = await fetch(`/api/nordvpn/apply/${instance}`, {
+                const response = await fetch(`/api/nordvpn/apply/${port}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ server_name: serverName })
@@ -1049,7 +1046,7 @@
             document.getElementById('protonvpn-server-info').style.display = 'block';
         }
         
-        async function applyProtonVPNServer(instance, type = 'wireproxy') {
+        async function applyProtonVPNServer(port, type = 'wireproxy') {
             const serverSelect = document.getElementById('protonvpn-server');
             const serverName = serverSelect.value;
             
@@ -1061,10 +1058,9 @@
             let confirmMsg = '';
             let apiUrl = '';
             
-            // Get port from current wireproxy instances
-            const wireproxyPort = currentWireproxyInstances[instance - 1]?.port || '?';
-            confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy ${instance} (port ${wireproxyPort})?\n\nThis will create WireGuard tunnel.`;
-            apiUrl = `/api/protonvpn/apply/${instance}`;
+            // Use port directly
+            confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy port ${port}?\n\nThis will create WireGuard tunnel.`;
+            apiUrl = `/api/protonvpn/apply/${port}`;
             
             if (!confirm(confirmMsg)) {
                 return;
@@ -1098,8 +1094,8 @@
                         message += `Test with:\n`;
                         message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://api.ipify.org`;
                     } else {
-                        // Wireproxy - show SOCKS5 info, get port from response
-                        const wireproxyPort = data.port || currentWireproxyInstances[instance - 1]?.port || '?';
+                        // Wireproxy - show SOCKS5 info, use port directly
+                        const wireproxyPort = data.port || port;
                         message += `Wireproxy Configuration:\n`;
                         message += `• Type: SOCKS5 (WireGuard tunnel)\n`;
                         message += `• Local Port: ${wireproxyPort}\n\n`;
@@ -1211,13 +1207,13 @@
             }
         }
         
-        async function deleteWireproxy(instance, port) {
-            if (!confirm(`Are you sure you want to delete Wireproxy ${instance} (port ${port})?\n\nThis will:\n- Stop the service if running\n- Delete the config file (wg${port}.conf)\n- Clean up log files\n\nThis action cannot be undone!`)) {
+        async function deleteWireproxy(port, port2) {
+            if (!confirm(`Are you sure you want to delete Wireproxy on port ${port}?\n\nThis will:\n- Stop the service if running\n- Delete the config file (wg${port}.conf)\n- Clean up log files\n\nThis action cannot be undone!`)) {
                 return;
             }
             
             try {
-                const response = await fetch(`/api/gost/delete/${instance}`, {
+                const response = await fetch(`/api/gost/delete/${port}`, {
                     method: 'DELETE'
                 });
                 

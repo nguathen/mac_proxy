@@ -21,43 +21,43 @@ if ! command -v haproxy &> /dev/null; then
     exit 1
 fi
 
+# Dynamic discovery: Start HAProxy services based on gost config files
+echo ""
+echo "🔍 Checking for gost config files to start corresponding HAProxy services..."
+
 # Dừng các instance cũ nếu có
-echo ""
-echo "🛑 Dừng các HAProxy instance cũ..."
-pkill -f "setup_haproxy.sh.*--sock-port 7891" || true
-pkill -f "setup_haproxy.sh.*--sock-port 7892" || true
+echo "🛑 Stopping existing HAProxy services..."
+pkill -f "setup_haproxy.sh" || true
 sleep 2
 
-# Khởi động HAProxy Instance 1
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🚀 Starting HAProxy Instance 1"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 chmod +x setup_haproxy.sh
-./setup_haproxy.sh \
-  --sock-port 7891 \
-  --stats-port 8091 \
-  --wg-ports 18181 \
-  --host-proxy 127.0.0.1:8111 \
-  --stats-auth admin:admin123 \
-  --health-interval 10 \
-  --daemon
 
-sleep 2
-
-# Khởi động HAProxy Instance 2
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🚀 Starting HAProxy Instance 2"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-./setup_haproxy.sh \
-  --sock-port 7892 \
-  --stats-port 8092 \
-  --wg-ports 18182 \
-  --host-proxy 127.0.0.1:8111 \
-  --stats-auth admin:admin123 \
-  --health-interval 10 \
-  --daemon
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        # Extract port from config file name
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        
+        # Calculate corresponding HAProxy port (gost_port - 10000)
+        haproxy_port=$((gost_port - 10000))
+        stats_port=$((haproxy_port + 200))
+        
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "🚀 Starting HAProxy Service (Port $haproxy_port)"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        ./setup_haproxy.sh \
+          --sock-port $haproxy_port \
+          --stats-port $stats_port \
+          --gost-ports $gost_port \
+          --host-proxy 127.0.0.1:8111 \
+          --stats-auth admin:admin123 \
+          --health-interval 10 \
+          --daemon
+        
+        sleep 2
+    fi
+done
 
 sleep 2
 
@@ -68,22 +68,44 @@ echo "✅ HAProxy instances đã khởi động"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📊 Thông tin proxy:"
-echo "   • HAProxy 1 (SOCKS5): socks5://0.0.0.0:7891"
-echo "   • HAProxy 2 (SOCKS5): socks5://0.0.0.0:7892"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        echo "   • HAProxy $haproxy_port (SOCKS5): socks5://0.0.0.0:$haproxy_port"
+    fi
+done
 echo ""
 echo "📈 HAProxy Stats:"
-echo "   • Instance 1: http://0.0.0.0:8091/haproxy?stats"
-echo "   • Instance 2: http://0.0.0.0:8092/haproxy?stats"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        stats_port=$((haproxy_port + 200))
+        echo "   • HAProxy $haproxy_port: http://0.0.0.0:$stats_port/haproxy?stats"
+    fi
+done
 echo "   • Auth: admin:admin123"
 echo ""
 echo "🔄 Cấu trúc fallback:"
-echo "   • HAProxy 1: Wiresock 18181 → Cloudflare WARP 8111"
-echo "   • HAProxy 2: Wiresock 18182 → Cloudflare WARP 8111"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        echo "   • HAProxy $haproxy_port: Gost $gost_port → Cloudflare WARP 8111"
+    fi
+done
 echo ""
 echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"
 echo "   • Dừng HAProxy: ./stop_haproxy_only.sh"
 echo "   • Xem logs: tail -f logs/haproxy_health_*.log"
-echo "   • Test SOCKS5 proxy 1: curl -x socks5h://127.0.0.1:7891 https://api.ipify.org"
-echo "   • Test SOCKS5 proxy 2: curl -x socks5h://127.0.0.1:7892 https://api.ipify.org"
+echo "   • Test Commands:"
+for config_file in ./logs/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+        haproxy_port=$((gost_port - 10000))
+        echo "     - Test $haproxy_port: curl -x socks5h://127.0.0.1:$haproxy_port https://api.ipify.org"
+    fi
+done
 echo ""

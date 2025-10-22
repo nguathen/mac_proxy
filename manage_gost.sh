@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # manage_gost.sh
-# Quản lý gost instances thay thế wireproxy
+# Quản lý gost services thay thế wireproxy
 
 set -euo pipefail
 
@@ -13,16 +13,7 @@ mkdir -p "$LOG_DIR"
 timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*"; }
 
-# Cấu hình gost instances
-declare -A GOST_INSTANCES=(
-    ["1"]="18181"
-    ["2"]="18182" 
-    ["3"]="18183"
-    ["4"]="18184"
-    ["5"]="18185"
-    ["6"]="18186"
-    ["7"]="18187"
-)
+# Gost ports được quản lý động dựa trên config files
 
 # Lấy thông tin proxy từ API
 get_proxy_info() {
@@ -38,8 +29,8 @@ get_proxy_info() {
         if [ -n "$api_response" ]; then
             # Tính port từ server label + 4443
             # Tìm server trong cache để lấy label chính xác
-            # Ưu tiên lấy label "6" nếu có, nếu không thì lấy label đầu tiên
-            local server_label=$(grep -A 5 "\"domain\": \"$country\"" /Volumes/Ssd/Projects/mac_proxy/protonvpn_servers_cache.json | grep '"label": "6"' | head -1 | cut -d'"' -f4)
+            # Ưu tiên lấy label khác "0" nếu có, nếu không thì lấy label đầu tiên
+            local server_label=$(grep -A 5 "\"domain\": \"$country\"" /Volumes/Ssd/Projects/mac_proxy/protonvpn_servers_cache.json | grep '"label": "[^0]' | head -1 | cut -d'"' -f4)
             if [ -z "$server_label" ]; then
                 # Fallback: lấy label đầu tiên
                 server_label=$(grep -A 5 "\"domain\": \"$country\"" /Volumes/Ssd/Projects/mac_proxy/protonvpn_servers_cache.json | grep '"label":' | head -1 | cut -d'"' -f4)
@@ -47,6 +38,10 @@ get_proxy_info() {
             if [ -z "$server_label" ]; then
                 # Fallback: tìm số trong country name
                 server_label=$(echo "$country" | grep -o '[0-9]\+' | head -1)
+            fi
+            if [ -z "$server_label" ]; then
+                # Final fallback: default to 0
+                server_label=0
             fi
             local port=$((server_label + 4443))
             echo "https://${api_response}@${country}:${port}"
@@ -58,34 +53,30 @@ get_proxy_info() {
     fi
 }
 
-# Lưu cấu hình proxy cho instance
+# Lưu cấu hình proxy cho port
 save_proxy_config() {
-    local instance=$1
+    local port=$1
     local provider=$2
     local country=$3
     local proxy_url=$4
     
-    # Trích xuất port từ proxy_url
-    local port=$(echo "$proxy_url" | sed 's/.*:\([0-9]*\)$/\1/')
-    
-    local config_file="$LOG_DIR/gost${instance}.config"
+    local config_file="$LOG_DIR/gost_${port}.config"
     cat > "$config_file" <<EOF
 {
-    "instance": $instance,
+    "port": "$port",
     "provider": "$provider",
     "country": "$country",
     "proxy_url": "$proxy_url",
-    "port": "$port",
     "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
-    log "💾 Saved config for gost $instance: $provider ($country)"
+    log "💾 Saved config for gost port $port: $provider ($country)"
 }
 
-# Đọc cấu hình proxy cho instance
+# Đọc cấu hình proxy cho port
 load_proxy_config() {
-    local instance=$1
-    local config_file="$LOG_DIR/gost${instance}.config"
+    local port=$1
+    local config_file="$LOG_DIR/gost_${port}.config"
     
     if [ -f "$config_file" ]; then
         cat "$config_file"
@@ -152,50 +143,51 @@ check_and_kill_port() {
 }
 
 start_gost() {
-    log "🚀 Starting gost instances..."
+    log "🚀 Starting gost services..."
     
     # Cập nhật ProtonVPN credentials trước khi start
     update_protonvpn_credentials
     
-    local instance=1
-    for port in 18181 18182 18183 18184 18185 18186 18187; do
-        # Check and kill any process using this port
-        check_and_kill_port "$port" "Gost $instance"
-        
-        # Start gost instance
-        local pid_file="$PID_DIR/gost${instance}.pid"
-        
-        if [ -f "$pid_file" ] && kill -0 $(cat "$pid_file") 2>/dev/null; then
-            log "⚠️  Gost $instance already running"
-        else
-            # Đọc cấu hình đã lưu
-            local config_json=$(load_proxy_config $instance)
-            local proxy_url=""
-            local provider=""
-            local country=""
+    # Start services dựa trên config files có sẵn
+    for config_file in "$LOG_DIR"/gost_*.config; do
+        if [ -f "$config_file" ]; then
+            local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
             
-            # Parse JSON config using jq
-            if [ "$config_json" != "{}" ]; then
-                proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
-                provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
-                country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+            # Check and kill any process using this port
+            check_and_kill_port "$port" "Gost on port $port"
+            
+            # Start gost service
+            local pid_file="$PID_DIR/gost_${port}.pid"
+            
+            if [ -f "$pid_file" ] && kill -0 $(cat "$pid_file") 2>/dev/null; then
+                log "⚠️  Gost on port $port already running"
+            else
+                # Đọc cấu hình đã lưu
+                local config_json=$(load_proxy_config $port)
+                local proxy_url=""
+                local provider=""
+                local country=""
+                
+                # Parse JSON config using jq
+                if [ "$config_json" != "{}" ]; then
+                    proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+                    provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
+                    country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+                fi
+                
+                # Nếu không có config hoặc config rỗng, skip port này
+                if [ -z "$proxy_url" ] || [ "$proxy_url" = "null" ]; then
+                    log "⚠️  No config for port $port, skipping..."
+                    continue
+                fi
+                
+                # Khởi động gost với socks5 proxy
+                nohup $GOST_BIN -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                local pid=$!
+                echo $pid > "$pid_file"
+                log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
             fi
-            
-            # Nếu không có config hoặc config rỗng, skip instance này
-            if [ -z "$proxy_url" ] || [ "$proxy_url" = "null" ]; then
-                log "⚠️  No config for instance $instance, skipping..."
-                ((instance++))
-                continue
-            fi
-            
-            # Khởi động gost với socks5 proxy
-            nohup $GOST_BIN -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost${instance}.log" 2>&1 &
-            local pid=$!
-            echo $pid > "$pid_file"
-            log "✅ Gost $instance started (PID: $pid, port $port, proxy: $proxy_url)"
         fi
-        
-        ((instance++))
     done
     
     sleep 2
@@ -203,36 +195,39 @@ start_gost() {
 }
 
 stop_gost() {
-    log "🛑 Stopping gost instances..."
+    log "🛑 Stopping gost services..."
     
-    local instance=1
     local stopped_any=false
     
-    # Stop all gost instances
-    for pid_file in "$PID_DIR"/gost*.pid; do
+    # Stop all gost services
+    for pid_file in "$PID_DIR"/gost_*.pid; do
         if [ -f "$pid_file" ]; then
+            local port=$(basename "$pid_file" | sed 's/gost_\(.*\)\.pid/\1/')
             pid=$(cat "$pid_file")
             if kill -0 "$pid" 2>/dev/null; then
-                kill "$pid" 2>/dev/null && log "✅ Stopped gost $instance (PID: $pid)"
+                kill "$pid" 2>/dev/null && log "✅ Stopped gost on port $port (PID: $pid)"
                 stopped_any=true
             else
-                log "⚠️  Gost $instance not running (stale PID)"
+                log "⚠️  Gost on port $port not running (stale PID)"
             fi
             rm -f "$pid_file"
-            ((instance++))
         fi
     done
     
-    if [ "$stopped_any" = false ] && [ ! -f "$PID_DIR"/gost*.pid ]; then
-        log "⚠️  No gost instances running"
+    if [ "$stopped_any" = false ] && [ ! -f "$PID_DIR"/gost_*.pid ]; then
+        log "⚠️  No gost services running"
     fi
     
     # Cleanup any remaining gost processes on detected ports
     log "🧹 Cleaning up any remaining processes on ports..."
     
-    for port in "${GOST_INSTANCES[@]}"; do
-        if command -v lsof &> /dev/null; then
-            lsof -ti ":$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+    # Cleanup based on config files
+    for config_file in "$LOG_DIR"/gost_*.config; do
+        if [ -f "$config_file" ]; then
+            local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+            if command -v lsof &> /dev/null; then
+                lsof -ti ":$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+            fi
         fi
     done
     
@@ -243,25 +238,94 @@ stop_gost() {
 }
 
 restart_gost() {
-    log "♻️  Restarting gost instances..."
+    log "♻️  Restarting gost services..."
     stop_gost
     sleep 2
     start_gost
 }
 
+# Restart specific gost service by port
+restart_gost_port() {
+    local port=$1
+    if [ -z "$port" ] || ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log "❌ Invalid port format. Must be a number"
+        return 1
+    fi
+    
+    log "♻️  Restarting gost on port $port..."
+    
+    # Stop specific service
+    local pid_file="$PID_DIR/gost_${port}.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null && log "✅ Stopped gost on port $port (PID: $pid)"
+        else
+            log "⚠️  Gost on port $port not running (stale PID)"
+        fi
+        rm -f "$pid_file"
+    else
+        log "⚠️  Gost on port $port not running"
+    fi
+    
+    # Cleanup port
+    if command -v lsof &> /dev/null; then
+        local pid_on_port=$(lsof -ti:$port 2>/dev/null)
+        if [ -n "$pid_on_port" ]; then
+            kill "$pid_on_port" 2>/dev/null && log "🧹 Cleaned up process on port $port"
+        fi
+    fi
+    
+    sleep 1
+    
+    # Check and kill any process using this port
+    check_and_kill_port "$port" "Gost on port $port"
+    
+    # Start gost service
+    local pid_file="$PID_DIR/gost_${port}.pid"
+    
+    if [ -f "$pid_file" ] && kill -0 $(cat "$pid_file") 2>/dev/null; then
+        log "⚠️  Gost on port $port already running"
+    else
+        # Đọc cấu hình đã lưu
+        local config_json=$(load_proxy_config $port)
+        local proxy_url=""
+        local provider=""
+        local country=""
+        
+        # Parse JSON config using jq
+        if [ "$config_json" != "{}" ]; then
+            proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+            provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
+            country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+        fi
+        
+        # Nếu không có config hoặc config rỗng, skip port này
+        if [ -z "$proxy_url" ] || [ "$proxy_url" = "null" ]; then
+            log "⚠️  No config for port $port, skipping..."
+            return 0
+        fi
+        
+        # Khởi động gost với socks5 proxy
+        nohup $GOST_BIN -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+        local pid=$!
+        echo $pid > "$pid_file"
+        log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
+    fi
+}
+
 status_gost() {
     log "📊 Gost Status:"
     
-    local instance=1
     local any_running=false
     
-    for port in "${GOST_INSTANCES[@]}"; do
-        local pid_file="$PID_DIR/gost${instance}.pid"
-        
+    # Hiển thị status dựa trên PID files có sẵn
+    for pid_file in "$PID_DIR"/gost_*.pid; do
         if [ -f "$pid_file" ]; then
+            local port=$(basename "$pid_file" | sed 's/gost_\(.*\)\.pid/\1/')
             pid=$(cat "$pid_file")
             if kill -0 "$pid" 2>/dev/null; then
-                log "  ✅ Gost $instance (port $port): Running (PID: $pid)"
+                log "  ✅ Port $port: Running (PID: $pid)"
                 any_running=true
                 
                 # Test connection
@@ -271,28 +335,25 @@ status_gost() {
                     log "     ⚠️  Connection: Failed (may need more time to establish)"
                 fi
             else
-                log "  ❌ Gost $instance (port $port): Not running"
+                log "  ❌ Port $port: Not running"
             fi
-        else
-            log "  ❌ Gost $instance (port $port): Not running"
         fi
-        
-        ((instance++))
     done
     
     if [ "$any_running" = false ]; then
-        log "  ⚠️  No gost instances are running"
+        log "  ⚠️  No gost services are running"
     fi
 }
 
-# Cấu hình proxy cho instance
+# Cấu hình proxy cho port
 configure_gost() {
-    local instance=$1
+    local port=$1
     local provider=$2
     local country=$3
     
-    if [ $instance -lt 1 ] || [ $instance -gt 7 ]; then
-        log "❌ Invalid instance. Available: 1-7"
+    # Validate port format (should be a number)
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+        log "❌ Invalid port format. Must be a number"
         return 1
     fi
     
@@ -309,40 +370,50 @@ configure_gost() {
     fi
     
     # Lưu cấu hình
-    save_proxy_config $instance "$provider" "$country" "$proxy_url"
-    log "✅ Configured gost $instance: $provider ($country)"
+    save_proxy_config $port "$provider" "$country" "$proxy_url"
+    log "✅ Configured gost port $port: $provider ($country)"
 }
 
 # Hiển thị cấu hình
 show_config() {
-    local instance=$1
+    local port=$1
     
-    if [ -n "$instance" ]; then
-        if [ $instance -lt 1 ] || [ $instance -gt 7 ]; then
-            log "❌ Invalid instance. Available: 1-7"
+    if [ -n "$port" ]; then
+        # Validate port format (should be a number)
+        if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+            log "❌ Invalid port format. Must be a number"
             return 1
         fi
         
-        local config_json=$(load_proxy_config $instance)
+        local config_json=$(load_proxy_config $port)
         if [ "$config_json" != "{}" ]; then
             echo "$config_json" | python3 -m json.tool 2>/dev/null || echo "$config_json"
         else
-            log "❌ No config found for gost $instance"
+            log "❌ No config found for gost port $port"
         fi
     else
-        # Hiển thị tất cả configs
+        # Hiển thị tất cả configs dựa trên files có sẵn
         log "📋 Gost Configurations:"
-        for i in {1..7}; do
-            local config_json=$(load_proxy_config $i)
-            if [ "$config_json" != "{}" ]; then
-                local provider=$(echo "$config_json" | grep -o '"provider":"[^"]*"' | cut -d'"' -f4)
-                local country=$(echo "$config_json" | grep -o '"country":"[^"]*"' | cut -d'"' -f4)
-                local proxy_url=$(echo "$config_json" | grep -o '"proxy_url":"[^"]*"' | cut -d'"' -f4)
-                log "  Instance $i: $provider ($country) - $proxy_url"
-            else
-                log "  Instance $i: No configuration"
+        local found_any=false
+        
+        # Tìm tất cả config files
+        for config_file in "$LOG_DIR"/gost_*.config; do
+            if [ -f "$config_file" ]; then
+                local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+                local config_json=$(cat "$config_file")
+                if [ "$config_json" != "{}" ]; then
+                local provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
+                local country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+                local proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+                    log "  Port $port: $provider ($country) - $proxy_url"
+                    found_any=true
+                fi
             fi
         done
+        
+        if [ "$found_any" = false ]; then
+            log "  No configurations found"
+        fi
     fi
 }
 
@@ -356,13 +427,29 @@ case "${1:-}" in
     restart)
         restart_gost
         ;;
+    restart-instance)
+        if [ $# -lt 2 ]; then
+            echo "Usage: $0 restart-instance <port>"
+            echo "  port: 18181-18187"
+            exit 1
+        fi
+        restart_gost_port "$2"
+        ;;
+    restart-port)
+        if [ $# -lt 2 ]; then
+            echo "Usage: $0 restart-port <port>"
+            echo "  port: 18181-18187"
+            exit 1
+        fi
+        restart_gost_port "$2"
+        ;;
     status)
         status_gost
         ;;
     config)
         if [ $# -lt 4 ]; then
-            echo "Usage: $0 config <instance> <provider> <country>"
-            echo "  instance: 1-7"
+            echo "Usage: $0 config <port> <provider> <country>"
+            echo "  port: 18181-18187"
             echo "  provider: nordvpn, protonvpn"
             echo "  country: server identifier"
             exit 1
@@ -370,23 +457,27 @@ case "${1:-}" in
         configure_gost "$2" "$3" "$4"
         ;;
     show-config)
-        show_config "$2"
+        show_config "${2:-}"
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|config|show-config}"
+        echo "Usage: $0 {start|stop|restart|restart-instance|restart-port|status|config|show-config}"
         echo ""
         echo "Commands:"
-        echo "  start                    - Start all gost instances"
-        echo "  stop                     - Stop all gost instances"
-        echo "  restart                  - Restart all gost instances"
-        echo "  status                   - Show status of all instances"
-        echo "  config <i> <p> <c>       - Configure instance i with provider p and country c"
-        echo "  show-config [i]          - Show configuration for instance i (or all)"
+        echo "  start                    - Start all gost services"
+        echo "  stop                     - Stop all gost services"
+        echo "  restart                  - Restart all gost services"
+        echo "  restart-instance <p>     - Restart specific gost service on port p"
+        echo "  restart-port <p>         - Restart gost on specific port p"
+        echo "  status                   - Show status of all services"
+        echo "  config <p> <pr> <c>      - Configure port p with provider pr and country c"
+        echo "  show-config [p]           - Show configuration for port p (or all)"
         echo ""
         echo "Examples:"
-        echo "  $0 config 1 protonvpn node-uk-29.protonvpn.net"
-        echo "  $0 config 2 nordvpn us"
-        echo "  $0 show-config 1"
+        echo "  $0 config 18181 protonvpn node-uk-29.protonvpn.net"
+        echo "  $0 config 18182 nordvpn us"
+        echo "  $0 restart-instance 18182"
+        echo "  $0 restart-port 18182"
+        echo "  $0 show-config 18181"
         echo "  $0 show-config"
         exit 1
         ;;

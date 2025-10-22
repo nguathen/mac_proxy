@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup_haproxy.sh
-# Multi-instance HAProxy with gost backends & Cloudflare WARP fallback
+# HAProxy with gost backends & Cloudflare WARP fallback
 # macOS/Linux compatible | 2025-10
 
 set -euo pipefail
@@ -30,10 +30,10 @@ usage() {
      [--health-interval 30] [--daemon]
      
 Examples:
-  # HAProxy instance 1 (port 7891)
+  # HAProxy service (port 7891)
   $0 --sock-port 7891 --stats-port 8091 --gost-ports 18181 --daemon
   
-  # HAProxy instance 2 (port 7892)
+  # HAProxy service (port 7892)
   $0 --sock-port 7892 --stats-port 8092 --gost-ports 18182 --daemon"
   exit 1
 }
@@ -149,7 +149,7 @@ listen stats_${SOCK_PORT}
     stats uri /haproxy?stats
     stats refresh 2s
     stats show-legends
-    stats show-desc HAProxy Instance - SOCKS:${SOCK_PORT}
+    stats show-desc HAProxy Service - SOCKS:${SOCK_PORT}
 EOF
 
   [[ -n "$STATS_AUTH" ]] && echo "    stats auth ${STATS_AUTH}" >> "$CFG_FILE"
@@ -243,7 +243,7 @@ health_loop() {
 
 ### --- Main ---
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-log "🚀 Starting HAProxy instance"
+log "🚀 Starting HAProxy service"
 log "   SOCKS Port: $SOCK_PORT"
 log "   Stats Port: $STATS_PORT (http://0.0.0.0:$STATS_PORT/haproxy?stats)"
 log "   Gost Backends: ${GOST_PORTS[*]}"

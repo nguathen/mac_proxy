@@ -65,7 +65,7 @@ chmod +x setup_haproxy.sh
 ./setup_haproxy.sh \
   --sock-port 7891 \
   --stats-port 8091 \
-  --wg-ports 18181 \
+  --gost-ports 18181 \
   --host-proxy 127.0.0.1:8111 \
   --stats-auth admin:admin123 \
   --health-interval 10 \
@@ -81,7 +81,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 ./setup_haproxy.sh \
   --sock-port 7892 \
   --stats-port 8092 \
-  --wg-ports 18182 \
+  --gost-ports 18182 \
   --host-proxy 127.0.0.1:8111 \
   --stats-auth admin:admin123 \
   --health-interval 10 \

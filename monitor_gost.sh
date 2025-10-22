@@ -14,16 +14,7 @@ mkdir -p "$LOG_DIR"
 timestamp() { date +"%Y-%m-%d %H:%M:%S"; }
 log() { echo "[$(timestamp)] $*" | tee -a "$MONITOR_LOG"; }
 
-# Cấu hình gost instances
-declare -A GOST_INSTANCES=(
-    ["1"]="18181"
-    ["2"]="18182" 
-    ["3"]="18183"
-    ["4"]="18184"
-    ["5"]="18185"
-    ["6"]="18186"
-    ["7"]="18187"
-)
+# Gost ports được quản lý động dựa trên config files
 
 # Test connection for a port
 test_connection() {
@@ -44,68 +35,62 @@ monitor_loop() {
     # Initialize failure counters
     declare -A fail_counts
     
-    local instance=1
-    for port in "${GOST_INSTANCES[@]}"; do
-        fail_counts["$instance"]=0
-        ((instance++))
+    # Initialize counters for all configured ports
+    for config_file in "$LOG_DIR"/gost_*.config; do
+        if [ -f "$config_file" ]; then
+            local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+            fail_counts["$port"]=0
+        fi
     done
     
     while true; do
-        instance=1
-        
-        for port in "${GOST_INSTANCES[@]}"; do
-            # Test connection
-            if test_connection "$port"; then
-                # Success - reset counter
-                if [ "${fail_counts[$instance]}" -gt 0 ]; then
-                    log "✅ Gost $instance (port $port) recovered"
-                fi
-                fail_counts["$instance"]=0
-            else
-                # Failed - increment counter
-                ((fail_counts["$instance"]++))
-                local count=${fail_counts[$instance]}
-                
-                log "⚠️  Gost $instance (port $port) failed ($count/$FAIL_THRESHOLD)"
-                
-                # Check if threshold reached
-                if [ "$count" -ge "$FAIL_THRESHOLD" ]; then
-                    log "🔄 Restarting gost $instance (port $port) - threshold reached"
-                    
-                    # Restart specific instance
-                    local pid_file="$LOG_DIR/gost${instance}.pid"
-                    
-                    # Stop
-                    if [ -f "$pid_file" ]; then
-                        pid=$(cat "$pid_file" 2>/dev/null || echo "")
-                        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-                            kill "$pid" 2>/dev/null || true
-                        fi
-                        rm -f "$pid_file"
+        for config_file in "$LOG_DIR"/gost_*.config; do
+            if [ -f "$config_file" ]; then
+                local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+                # Test connection
+                if test_connection "$port"; then
+                    # Success - reset counter
+                    if [ "${fail_counts[$port]}" -gt 0 ]; then
+                        log "✅ Gost port $port recovered"
                     fi
+                    fail_counts["$port"]=0
+                else
+                    # Failed - increment counter
+                    ((fail_counts["$port"]++))
+                    local count=${fail_counts[$port]}
                     
-                    # Kill port
-                    lsof -ti ":$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
-                    sleep 2
+                    log "⚠️  Gost port $port failed ($count/$FAIL_THRESHOLD)"
                     
-                    # Start
-                    local log_file="$LOG_DIR/gost${instance}.log"
-                    local proxy_url="https://user:pass@az-01.protonvpn.net:4465"
-                    nohup gost -L socks5://:$port -F "$proxy_url" > "$log_file" 2>&1 &
-                    local new_pid=$!
-                    echo "$new_pid" > "$pid_file"
+                    # Check if threshold reached
+                    if [ "$count" -ge "$FAIL_THRESHOLD" ]; then
+                        log "🔄 Restarting gost port $port - threshold reached"
+                        
+                        # Restart specific service
+                        local pid_file="$LOG_DIR/gost_${port}.pid"
                     
-                    log "✅ Gost $instance restarted (PID: $new_pid)"
-                    
-                    # Reset counter
-                    fail_counts["$instance"]=0
-                    
-                    # Wait for it to stabilize
-                    sleep 10
+                        # Stop
+                        if [ -f "$pid_file" ]; then
+                            pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                                kill "$pid" 2>/dev/null || true
+                            fi
+                            rm -f "$pid_file"
+                        fi
+                        
+                        # Kill port
+                        lsof -ti ":$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+                        sleep 2
+                        
+                        # Start using manage_gost.sh
+                        ./manage_gost.sh restart-port "$port"
+                        
+                        log "✅ Gost port $port restarted"
+                        
+                        # Reset counter
+                        fail_counts["$port"]=0
+                    fi
                 fi
             fi
-            
-            ((instance++))
         done
         
         sleep "$CHECK_INTERVAL"
