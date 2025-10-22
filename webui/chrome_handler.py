@@ -12,7 +12,7 @@ import random
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port, _find_available_haproxy, _get_server_from_haproxy_config, _create_haproxy_with_server, _reconfigure_haproxy_with_server):
+def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port):
     """Đăng ký các routes Chrome với Flask app"""
     
     @app.route('/api/chrome/proxy-check', methods=['POST'])

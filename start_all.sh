@@ -28,9 +28,9 @@ chmod +x manage_gost.sh
 
 # Cấu hình mặc định nếu chưa có
 echo "📋 Checking gost configurations..."
-if [ ! -f "logs/gost_18181.config" ]; then
+if [ ! -f "config/gost_18181.config" ]; then
     echo "   Setting up default configuration for instance 18181..."
-    ./manage_gost.sh config 18181 protonvpn "node-uk-29.protonvpn.net"
+    ./manage_gost.sh config 18181 protonvpn "node-uk-29.protonvpn.net" "node-uk-29.protonvpn.net" "4443"
 fi
 
 ./manage_gost.sh start

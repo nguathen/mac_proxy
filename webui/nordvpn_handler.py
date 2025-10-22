@@ -130,17 +130,50 @@ def register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_c
             server_name = data.get('server_name')
             proxy_host = data.get('proxy_host')
             proxy_port = data.get('proxy_port')
+            country_code = data.get('country_code')
             
-            if not server_name:
-                return jsonify({'success': False, 'error': 'No server name provided'}), 400
-            
-            if not proxy_host or not proxy_port:
-                return jsonify({'success': False, 'error': 'proxy_host and proxy_port are required'}), 400
-            
-            # Get server info
-            server = nordvpn_api.get_server_by_name(server_name)
-            if not server:
-                return jsonify({'success': False, 'error': 'Server not found'}), 404
+            # Determine which case we're handling
+            if country_code and not proxy_host and not proxy_port:
+                # Case 1: Only country_code provided - get random server from country
+                servers = nordvpn_api.get_servers_by_country(country_code)
+                if not servers:
+                    return jsonify({'success': False, 'error': f'No servers found for country {country_code}'}), 404
+                
+                import random
+                server = random.choice(servers)
+                proxy_host = server.get('hostname', '')
+                proxy_port = 89  # NordVPN standard port
+                server_name = server.get('name', '')
+                
+            elif proxy_host and proxy_port:
+                # Case 2: proxy_host and proxy_port provided - use directly
+                # Find server by proxy_host to get server info
+                all_servers = nordvpn_api.get_all_servers()
+                server = None
+                for s in all_servers:
+                    if s.get('hostname', '').lower() == proxy_host.lower():
+                        server = s
+                        break
+                
+                if not server:
+                    return jsonify({'success': False, 'error': f'Server with hostname {proxy_host} not found'}), 404
+                
+                server_name = server.get('name', '')
+                    
+            elif not country_code and not proxy_host and not proxy_port:
+                # Case 3: Null/empty - random server from any country
+                all_servers = nordvpn_api.get_all_servers()
+                if not all_servers:
+                    return jsonify({'success': False, 'error': 'No servers available'}), 404
+                
+                import random
+                server = random.choice(all_servers)
+                proxy_host = server.get('hostname', '')
+                proxy_port = 89  # NordVPN standard port
+                server_name = server.get('name', '')
+                
+            else:
+                return jsonify({'success': False, 'error': 'Invalid parameters. Provide either country_code, or proxy_host+proxy_port, or leave all empty for random'}), 400
             
             # Validate port - check if it's a valid gost port (18181-18999 range)
             try:

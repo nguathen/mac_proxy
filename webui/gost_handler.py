@@ -12,25 +12,9 @@ from datetime import datetime
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port):
+def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port, get_available_gost_ports):
     """Đăng ký các routes Gost với Flask app"""
     
-    def get_available_gost_ports():
-        """Dynamically scan for available gost ports from config files"""
-        gost_ports = set()
-        
-        # Scan config files in config/ directory
-        config_dir = os.path.join(BASE_DIR, 'config')
-        if os.path.exists(config_dir):
-            for filename in os.listdir(config_dir):
-                if filename.startswith('gost_') and filename.endswith('.config'):
-                    try:
-                        port = filename.replace('gost_', '').replace('.config', '')
-                        gost_ports.add(port)
-                    except (ValueError, IndexError):
-                        pass
-        
-        return sorted(list(gost_ports))
 
     @app.route('/api/gost/config/<port>')
     def api_get_gost_config(port):

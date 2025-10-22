@@ -206,6 +206,11 @@ class NordVPNAPI:
         
         return config
 
+    
+    def get_all_servers(self):
+        """Lấy tất cả servers"""
+        return self.fetch_servers()
+
 
 if __name__ == '__main__':
     # Test the API

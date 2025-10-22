@@ -26,7 +26,6 @@ from protonvpn_handler import register_protonvpn_routes
 from gost_handler import register_gost_routes
 from haproxy_handler import register_haproxy_routes
 from chrome_handler import register_chrome_routes
-from utils import *
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'haproxy-webui-secret-key-2025'
@@ -140,8 +139,12 @@ def get_available_gost_ports():
 
 def is_valid_gost_port(port):
     """Check if port is a valid gost port using dynamic discovery"""
-    available_ports = get_available_gost_ports()
-    return port in available_ports
+    try:
+        port_num = int(port)
+        # Check if port is in valid range (18181-18999)
+        return 18181 <= port_num <= 18999
+    except (ValueError, TypeError):
+        return False
 
 def parse_gost_config(port):
     """Parse gost config for port"""
@@ -526,32 +529,13 @@ def _get_proxy_port(server_name, vpn_provider):
             pass
         return 4443  # Default ProtonVPN port
 
-def _find_available_haproxy(profiles, target_server, vpn_provider):
-    """Find available HAProxy that's not in use by profiles"""
-    # Simplified implementation - return None for now
-    return None
-
-def _get_server_from_haproxy_config(haproxy_config_path):
-    """Get server name from HAProxy config"""
-    # Simplified implementation - return None for now
-    return None
-
-def _create_haproxy_with_server(port, server_name, vpn_provider):
-    """Create HAProxy with server"""
-    # Simplified implementation
-    return {'success': False, 'error': 'Not implemented'}
-
-def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
-    """Reconfigure HAProxy with server"""
-    # Simplified implementation
-    return {'success': False, 'error': 'Not implemented'}
 
 # Register all routes
 register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_check, nordvpn_api, proxy_api)
 register_protonvpn_routes(app, save_gost_config, run_command, trigger_health_check, protonvpn_api, proxy_api)
-register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port)
+register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port, get_available_gost_ports)
 register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports)
-register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port, _find_available_haproxy, _get_server_from_haproxy_config, _create_haproxy_with_server, _reconfigure_haproxy_with_server)
+register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port)
 
 if __name__ == '__main__':
     # Tạo thư mục logs nếu chưa có
