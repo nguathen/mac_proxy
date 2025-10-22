@@ -32,7 +32,7 @@ sleep 2
 
 chmod +x setup_haproxy.sh
 
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         # Extract port from config file name
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
@@ -68,7 +68,7 @@ echo "✅ HAProxy instances đã khởi động"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📊 Thông tin proxy:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -77,7 +77,7 @@ for config_file in ./logs/gost_*.config; do
 done
 echo ""
 echo "📈 HAProxy Stats:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -88,7 +88,7 @@ done
 echo "   • Auth: admin:admin123"
 echo ""
 echo "🔄 Cấu trúc fallback:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -101,7 +101,7 @@ echo "   • Kiểm tra trạng thái: ./status_all.sh"
 echo "   • Dừng HAProxy: ./stop_haproxy_only.sh"
 echo "   • Xem logs: tail -f logs/haproxy_health_*.log"
 echo "   • Test Commands:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))

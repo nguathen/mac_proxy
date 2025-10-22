@@ -7,6 +7,7 @@ set -euo pipefail
 GOST_BIN="gost"
 LOG_DIR="./logs"
 PID_DIR="./logs"
+CONFIG_DIR="./config"
 
 mkdir -p "$LOG_DIR"
 
@@ -60,7 +61,7 @@ save_proxy_config() {
     local country=$3
     local proxy_url=$4
     
-    local config_file="$LOG_DIR/gost_${port}.config"
+    local config_file="$CONFIG_DIR/gost_${port}.config"
     cat > "$config_file" <<EOF
 {
     "port": "$port",
@@ -76,7 +77,7 @@ EOF
 # Đọc cấu hình proxy cho port
 load_proxy_config() {
     local port=$1
-    local config_file="$LOG_DIR/gost_${port}.config"
+    local config_file="$CONFIG_DIR/gost_${port}.config"
     
     if [ -f "$config_file" ]; then
         cat "$config_file"
@@ -149,7 +150,7 @@ start_gost() {
     update_protonvpn_credentials
     
     # Start services dựa trên config files có sẵn
-    for config_file in "$LOG_DIR"/gost_*.config; do
+    for config_file in "$CONFIG_DIR"/gost_*.config; do
         if [ -f "$config_file" ]; then
             local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
             
@@ -222,7 +223,7 @@ stop_gost() {
     log "🧹 Cleaning up any remaining processes on ports..."
     
     # Cleanup based on config files
-    for config_file in "$LOG_DIR"/gost_*.config; do
+    for config_file in "$CONFIG_DIR"/gost_*.config; do
         if [ -f "$config_file" ]; then
             local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
             if command -v lsof &> /dev/null; then
@@ -397,7 +398,7 @@ show_config() {
         local found_any=false
         
         # Tìm tất cả config files
-        for config_file in "$LOG_DIR"/gost_*.config; do
+        for config_file in "$CONFIG_DIR"/gost_*.config; do
             if [ -f "$config_file" ]; then
                 local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
                 local config_json=$(cat "$config_file")

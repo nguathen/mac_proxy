@@ -502,6 +502,7 @@
                         <div class="service-info">Port: ${wp.port}</div>
                         <div class="service-info">Status: ${wp.running ? '✅ Running' : '❌ Stopped'}</div>
                         ${wp.running ? `<div class="service-info">Connection: ${wp.connection ? '🌐 OK' : '⚠️ Failed'}</div>` : ''}
+                        ${wp.server_info ? `<div class="service-info">Server: ${wp.server_info}</div>` : ''}
                         ${wp.pid ? `<div class="service-info">PID: ${wp.pid}</div>` : ''}
                         <div class="btn-group">
                             ${!wp.running ? `<button class="btn btn-success" onclick="controlWireproxyInstance('${wp.port}', 'start')">Start</button>` : ''}
@@ -529,7 +530,7 @@
                             </span>
                         </div>
                         <div class="service-info">Port: ${hp.port}</div>
-                        ${hp.wireproxy_port ? `<div class="service-info">Wireproxy: ${hp.wireproxy_port}</div>` : ''}
+                        ${hp.gost_backend ? `<div class="service-info">Gost Backend: ${hp.gost_backend}</div>` : ''}
                         <div class="service-info">Status: ${hp.running ? '✅ Running' : '❌ Stopped'}</div>
                         ${hp.pid ? `<div class="service-info">PID: ${hp.pid}</div>` : ''}
                         ${hp.running ? `<a href="${hp.stats_url}" target="_blank" class="stats-link">📊 View Stats</a>` : ''}
@@ -1194,6 +1195,10 @@
                     method: 'DELETE'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -1203,12 +1208,13 @@
                     alert(`❌ Error: ${data.error}`);
                 }
             } catch (error) {
+                console.error('Delete HAProxy error:', error);
                 alert(`❌ Error: ${error.message}`);
             }
         }
         
         async function deleteWireproxy(port, port2) {
-            if (!confirm(`Are you sure you want to delete Wireproxy on port ${port}?\n\nThis will:\n- Stop the service if running\n- Delete the config file (wg${port}.conf)\n- Clean up log files\n\nThis action cannot be undone!`)) {
+            if (!confirm(`Are you sure you want to delete Gost on port ${port}?\n\nThis will:\n- Stop the service if running\n- Delete the config file (gost_${port}.config)\n- Clean up log files\n\nThis action cannot be undone!`)) {
                 return;
             }
             
@@ -1217,6 +1223,10 @@
                     method: 'DELETE'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.success) {
@@ -1226,6 +1236,7 @@
                     alert(`❌ Error: ${data.error}`);
                 }
             } catch (error) {
+                console.error('Delete Gost error:', error);
                 alert(`❌ Error: ${error.message}`);
             }
         }

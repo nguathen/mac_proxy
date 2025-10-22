@@ -52,10 +52,11 @@ def reset_gost_configs():
     try:
         # Find all existing config files
         config_files = []
-        for config_file in os.listdir(LOG_DIR):
+        config_dir = os.path.join(os.path.dirname(LOG_DIR), 'config')
+        for config_file in os.listdir(config_dir):
             if config_file.startswith('gost_') and config_file.endswith('.config'):
                 config_files.append(config_file)
-                os.remove(os.path.join(LOG_DIR, config_file))
+                os.remove(os.path.join(config_dir, config_file))
                 print(f"✅ Removed {config_file}")
         
         print(f"✅ Removed {len(config_files)} existing config files")
@@ -78,7 +79,7 @@ def reset_gost_configs():
                             'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
                         }
                         
-                        config_file = os.path.join(LOG_DIR, f'gost_{port}.config')
+                        config_file = os.path.join(config_dir, f'gost_{port}.config')
                         with open(config_file, 'w') as f:
                             json.dump(config, f, indent=4)
                         
@@ -99,7 +100,7 @@ def reset_gost_configs():
                             'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
                         }
                         
-                        config_file = os.path.join(LOG_DIR, f'gost_{port}.config')
+                        config_file = os.path.join(config_dir, f'gost_{port}.config')
                         with open(config_file, 'w') as f:
                             json.dump(config, f, indent=4)
                         

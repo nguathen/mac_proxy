@@ -74,7 +74,7 @@ start_instance() {
 # Dynamic discovery: Check gost config files and start corresponding HAProxy services
 echo "🔍 Checking available gost services..."
 
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         # Extract port from config file name
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
@@ -109,7 +109,7 @@ echo ""
 echo "📊 Current Status:"
 
 # Kiểm tra trạng thái cuối cùng dựa trên config files
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -124,7 +124,7 @@ done
 
 echo ""
 echo "📈 HAProxy Stats:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -135,7 +135,7 @@ done
 echo "   • Auth: admin:admin123"
 echo ""
 echo "📝 Test Commands:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))

@@ -14,13 +14,20 @@ echo "1️⃣ Stopping old services..."
 # Khởi động gost instances
 echo ""
 echo "2️⃣ Starting gost instances..."
-./simple_gost.sh
+
+# Tạo config mặc định nếu chưa có
+if [ ! -f "config/gost_18181.config" ]; then
+    echo "📋 Creating default gost configuration..."
+    ./manage_gost.sh config 18181 protonvpn node-uk-29.protonvpn.net
+fi
+
+./manage_gost.sh start
 
 # Khởi động HAProxy instances
 echo ""
 echo "3️⃣ Starting HAProxy instances..."
 # Dynamic discovery: Start HAProxy services based on gost config files
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -46,7 +53,7 @@ echo ""
 echo "✅ Gost System Started Successfully!"
 echo ""
 echo "📊 Proxy Endpoints:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -55,7 +62,7 @@ for config_file in ./logs/gost_*.config; do
 done
 echo ""
 echo "📈 HAProxy Stats:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))
@@ -69,7 +76,7 @@ echo "🌐 Web UI:"
 echo "   • URL: http://127.0.0.1:5000"
 echo ""
 echo "🧪 Test Commands:"
-for config_file in ./logs/gost_*.config; do
+for config_file in ./config/gost_*.config; do
     if [ -f "$config_file" ]; then
         gost_port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
         haproxy_port=$((gost_port - 10000))

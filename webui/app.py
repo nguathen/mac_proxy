@@ -82,24 +82,62 @@ def run_command(cmd, cwd=BASE_DIR):
             'returncode': -1
         }
 
-def get_gost_ports():
-    """Get list of valid gost ports"""
-    return ["18181", "18182", "18183", "18184", "18185", "18186", "18187"]
+def get_available_haproxy_ports():
+    """Dynamically scan for available HAProxy ports from config files"""
+    haproxy_ports = set()
+    
+    # Scan config files
+    config_dir = os.path.join(BASE_DIR, 'config')
+    if os.path.exists(config_dir):
+        for filename in os.listdir(config_dir):
+            if filename.startswith('haproxy_') and filename.endswith('.cfg'):
+                try:
+                    port = filename.replace('haproxy_', '').replace('.cfg', '')
+                    haproxy_ports.add(port)
+                except (ValueError, IndexError):
+                    pass
+    
+    # Scan PID files for running processes
+    if os.path.exists(LOG_DIR):
+        for filename in os.listdir(LOG_DIR):
+            if filename.startswith('haproxy_') and filename.endswith('.pid'):
+                try:
+                    port = filename.replace('haproxy_', '').replace('.pid', '')
+                    haproxy_ports.add(port)
+                except (ValueError, IndexError):
+                    pass
+    
+    return sorted(list(haproxy_ports))
+
+def get_available_gost_ports():
+    """Dynamically scan for available gost ports from config files"""
+    gost_ports = set()
+    
+    # Scan config files in config/ directory
+    config_dir = os.path.join(BASE_DIR, 'config')
+    if os.path.exists(config_dir):
+        for filename in os.listdir(config_dir):
+            if filename.startswith('gost_') and filename.endswith('.config'):
+                try:
+                    port = filename.replace('gost_', '').replace('.config', '')
+                    gost_ports.add(port)
+                except (ValueError, IndexError):
+                    pass
+    
+    return sorted(list(gost_ports))
 
 def is_valid_gost_port(port):
-    """Check if port is a valid gost port"""
-    return port in get_gost_ports()
+    """Check if port is a valid gost port using dynamic discovery"""
+    available_ports = get_available_gost_ports()
+    return port in available_ports
 
 def parse_gost_config(port):
     """Parse gost config for port"""
     if not is_valid_gost_port(port):
         return None
     
-    # Get instance number from port for file naming
-    gost_ports = get_gost_ports()
-    instance = gost_ports.index(port) + 1
-    
-    config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+    # Use port-based file naming in config/ directory
+    config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
     
     # Default config
     config = {
@@ -142,15 +180,11 @@ def save_gost_config(port, config):
         if not provider or not country:
             return False
         
-        # Get instance number from port for manage_gost.sh
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
-        
-        # Lưu config trực tiếp vào file
-        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+        # Use port-based file naming in config/ directory
+        config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
         
         # Thêm thông tin cần thiết vào config
-        config['instance'] = instance
+        config['port'] = port
         config['created_at'] = datetime.now().isoformat() + 'Z'
         
         try:
@@ -169,24 +203,20 @@ def get_random_server_for_port(port, provider='protonvpn'):
         import random
         import time
         
-        # Get instance number from port for seeding
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
-        
         # Add port-specific seed to ensure different servers
-        random.seed(int(time.time() * 1000) + instance)
+        random.seed(int(time.time() * 1000) + int(port))
         
         if provider == 'protonvpn':
             servers = protonvpn_api.fetch_servers() if protonvpn_api else []
             if servers:
                 random.shuffle(servers)
-                selected_server = servers[instance % len(servers)]
+                selected_server = servers[int(port) % len(servers)]
                 return selected_server.get('domain', selected_server.get('name', ''))
         elif provider == 'nordvpn':
             servers = nordvpn_api.fetch_servers() if nordvpn_api else []
             if servers:
                 random.shuffle(servers)
-                selected_server = servers[instance % len(servers)]
+                selected_server = servers[int(port) % len(servers)]
                 return selected_server.get('hostname', selected_server.get('name', ''))
         
         return None
@@ -220,7 +250,8 @@ def trigger_health_check():
     """Trigger HAProxy health monitors to check immediately by creating trigger file"""
     try:
         # Create trigger files for health monitors
-        for port in ['7891', '7892']:
+        available_ports = get_available_haproxy_ports()
+        for port in available_ports:
             trigger_file = os.path.join(LOG_DIR, f'trigger_check_{port}')
             try:
                 with open(trigger_file, 'w') as f:
@@ -244,30 +275,29 @@ def api_status():
         'timestamp': datetime.now().isoformat()
     }
     
-    # Check gost instances - include instances that have been created or are running
-    gost_instances = {}
-    for port in get_gost_ports():
-        # Get instance number from port for file naming
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
+    # Check gost services - include services that have been created or are running
+    gost_services = {}
+    
+    # Check for port-based config files (gost_PORT.config) - use dynamic discovery
+    available_ports = get_available_gost_ports()
+    for port in available_ports:
+        config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+        pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
         
-        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
-        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
-        
-        # Include instance if it has config file, pid file, or is running on port
-        # This ensures stopped instances with configs still appear
+        # Include service if it has config file, pid file, or is running on port
         if (os.path.exists(config_file) or 
             os.path.exists(pid_file) or 
             run_command(f'lsof -ti :{port}')['success']):
-            gost_instances[port] = instance
+            gost_services[port] = port
     
-    # Check status for each gost instance in parallel to avoid blocking
-    def _probe_gost(port_instance):
-        port, instance = port_instance
-        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
+    # Check status for each gost service in parallel to avoid blocking
+    def _probe_gost(port):
         running = False
         pid = None
         proxy_url = ""
+        
+        # Use port-based file naming
+        pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
         
         if os.path.exists(pid_file):
             try:
@@ -302,10 +332,49 @@ def api_status():
                 except (ValueError, IndexError):
                     pass
         
+        # Try to get proxy URL from config file if not found in command
+        if not proxy_url:
+            # Try new format config file first
+            config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+            if not os.path.exists(config_file):
+                # Fallback to old format
+                config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+            
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, 'r') as f:
+                        import json
+                        config = json.load(f)
+                        proxy_url = config.get('proxy_url', '')
+                except Exception:
+                    pass
+        
         connection_ok = False
         if running:
             result = run_command(f'curl -s --max-time 2 -x socks5h://127.0.0.1:{port} https://api.ipify.org')
             connection_ok = bool(result['success'] and result['stdout'].strip())
+        
+        # Parse server:port from proxy_url
+        server_info = ""
+        if proxy_url:
+            try:
+                # Extract server and port from proxy URL
+                import re
+                # Match patterns like https://user:pass@server:port or socks5://server:port
+                match = re.search(r'@([^:]+):(\d+)', proxy_url)
+                if match:
+                    server = match.group(1)
+                    server_port = match.group(2)
+                    server_info = f"{server}:{server_port}"
+                else:
+                    # Try to extract from other patterns
+                    match = re.search(r'://([^:]+):(\d+)', proxy_url)
+                    if match:
+                        server = match.group(1)
+                        server_port = match.group(2)
+                        server_info = f"{server}:{server_port}"
+            except Exception:
+                pass
         
         return {
             'name': f'Port {port}',
@@ -313,11 +382,12 @@ def api_status():
             'running': running,
             'pid': pid,
             'connection': connection_ok,
-            'proxy_url': proxy_url
+            'proxy_url': proxy_url,
+            'server_info': server_info
         }
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(gost_instances)))) as executor:
-        results = list(executor.map(_probe_gost, gost_instances.items()))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(gost_services)))) as executor:
+        results = list(executor.map(_probe_gost, gost_services.keys()))
     status['gost'].extend(results)
     
     # Check HAProxy - scan all config files and running processes
@@ -354,16 +424,22 @@ def api_status():
             except (OSError, ValueError):
                 pass
         
-        # Get wireproxy port from HAProxy config
+        # Get gost backend port from HAProxy config
         haproxy_config = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
         if os.path.exists(haproxy_config):
             try:
                 with open(haproxy_config, 'r') as f:
                     content = f.read()
                     import re
-                    match = re.search(r'server\s+wg\d+\s+127\.0\.0\.1:(\d+)', content)
+                    # Look for gost backend servers
+                    match = re.search(r'server\s+gost\d+\s+127\.0\.0\.1:(\d+)', content)
                     if match:
                         wireproxy_port = match.group(1)
+                    else:
+                        # Fallback to old wireproxy format
+                        match = re.search(r'server\s+wg\d+\s+127\.0\.0\.1:(\d+)', content)
+                        if match:
+                            wireproxy_port = match.group(1)
             except Exception:
                 pass
         
@@ -379,6 +455,7 @@ def api_status():
             'running': running,
             'pid': pid,
             'wireproxy_port': wireproxy_port,
+            'gost_backend': wireproxy_port,  # Show gost backend port
             'stats_url': f'http://127.0.0.1:{stats_port}/haproxy?stats'
         })
     
@@ -443,19 +520,17 @@ def api_gost_port_action(port, action):
         return jsonify({'success': False, 'error': 'Invalid action'}), 400
     
     # Validate port
-    if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
+    if not is_valid_gost_port(port):
         return jsonify({
             'success': False, 
-            'error': f'Invalid port. Available ports: 18181-18187'
+            'error': f'Invalid port: {port}'
         }), 400
     
-    # Get instance number from port for file naming
-    gost_ports = get_gost_ports()
-    instance = gost_ports.index(port) + 1
-    pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
+    # Use port-based file naming
+    pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
     
     if action == 'stop':
-        # Stop gost instance
+        # Stop gost service
         if os.path.exists(pid_file):
             try:
                 with open(pid_file) as f:
@@ -523,7 +598,7 @@ def api_gost_port_action(port, action):
                             'proxy_url': proxy_url
                         }
                         save_gost_config(port, random_config)
-                        print(f"✅ Created random ProtonVPN config for gost {instance}: {server_name}")
+                        print(f"✅ Created random ProtonVPN config for gost port {port}: {server_name}")
                 
                 # If ProtonVPN failed, try NordVPN
                 if not proxy_url:
@@ -541,17 +616,17 @@ def api_gost_port_action(port, action):
                                 'proxy_url': proxy_url
                             }
                             save_gost_config(port, random_config)
-                            print(f"✅ Created random NordVPN config for gost {instance}: {server_name}")
+                            print(f"✅ Created random NordVPN config for gost port {port}: {server_name}")
                 
             except Exception as e:
-                print(f"⚠️  Failed to create random config for gost {instance}: {e}")
+                print(f"⚠️  Failed to create random config for gost port {port}: {e}")
         
         # Fallback to default if still no proxy URL
         if not proxy_url:
             proxy_url = 'https://user:pass@az-01.protonvpn.net:4465'
         
         # Start gost
-        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
+        log_file = os.path.join(LOG_DIR, f'gost_{port}.log')
         cmd = f'nohup gost -L socks5://:{port} -F "{proxy_url}" > {log_file} 2>&1 & echo $!'
         result = run_command(cmd)
         
@@ -568,7 +643,7 @@ def api_gost_port_action(port, action):
             
             return jsonify({
                 'success': True,
-                'message': f'Gost {instance} started successfully',
+                'message': f'Gost port {port} started successfully',
                 'pid': pid
             })
         else:
@@ -599,7 +674,7 @@ def api_gost_port_action(port, action):
         time.sleep(1)
         
         # Get proxy URL from config
-        config = parse_gost_config(instance)
+        config = parse_gost_config(port)
         proxy_url = config.get('proxy_url', '') if config else ''
         
         # If no proxy URL or empty, try to create random config
@@ -621,7 +696,7 @@ def api_gost_port_action(port, action):
                             'proxy_url': proxy_url
                         }
                         save_gost_config(port, random_config)
-                        print(f"✅ Created random ProtonVPN config for gost {instance}: {server_name}")
+                        print(f"✅ Created random ProtonVPN config for gost port {port}: {server_name}")
                 
                 # If ProtonVPN failed, try NordVPN
                 if not proxy_url:
@@ -639,17 +714,17 @@ def api_gost_port_action(port, action):
                                 'proxy_url': proxy_url
                             }
                             save_gost_config(port, random_config)
-                            print(f"✅ Created random NordVPN config for gost {instance}: {server_name}")
+                            print(f"✅ Created random NordVPN config for gost port {port}: {server_name}")
                 
             except Exception as e:
-                print(f"⚠️  Failed to create random config for gost {instance}: {e}")
+                print(f"⚠️  Failed to create random config for gost port {port}: {e}")
         
         # Fallback to default if still no proxy URL
         if not proxy_url:
             proxy_url = 'https://user:pass@az-01.protonvpn.net:4465'
         
         # Start gost
-        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
+        log_file = os.path.join(LOG_DIR, f'gost_{port}.log')
         cmd = f'nohup gost -L socks5://:{port} -F "{proxy_url}" > {log_file} 2>&1 & echo $!'
         result = run_command(cmd)
         
@@ -663,7 +738,7 @@ def api_gost_port_action(port, action):
             
             return jsonify({
                 'success': True,
-                'message': f'Gost {instance} restarted successfully',
+                'message': f'Gost port {port} restarted successfully',
                 'pid': pid
             })
         else:
@@ -800,41 +875,35 @@ def api_haproxy_create():
         # Create config directory if not exists
         os.makedirs(config_dir, exist_ok=True)
         
-        # Auto-create Wireproxy config files for ports that don't exist
+        # Auto-create Gost config files for ports that don't exist
         if wg_ports:
             for port in wg_ports:
-                wg_conf_file = os.path.join(BASE_DIR, f'wg{port}.conf')
-                if not os.path.exists(wg_conf_file):
-                    # Create default Wireproxy config
-                    default_config = f"""[Interface]
-PrivateKey = ECDeW1Oi8TC5reUZcyp8n3KAOaDVz3ZXZB5tu1+8Ik4=
-Address = 10.5.0.2/16
-DNS = 103.86.96.100
-
-[Peer]
-PublicKey = aUuKVXQ//4UnXcPOqai/qGTfUK6qrdNRa6crPCF32x4=
-Endpoint = 185.153.177.126:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 15
-
-[Socks5]
-BindAddress = 127.0.0.1:{port}
-"""
+                gost_config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+                if not os.path.exists(gost_config_file):
+                    # Create default Gost config with Cloudflare WARP fallback
+                    default_config = {
+                        "port": str(port),
+                        "provider": "protonvpn",
+                        "country": "node-uk-29.protonvpn.net",
+                        "proxy_url": "socks5://127.0.0.1:8111",
+                        "created_at": datetime.now().isoformat()
+                    }
                     try:
-                        with open(wg_conf_file, 'w') as f:
-                            f.write(default_config)
+                        import json
+                        with open(gost_config_file, 'w') as f:
+                            json.dump(default_config, f, indent=4)
                     except Exception as e:
                         # Log error but continue
                         pass
         
-        # Build WireGuard servers config
-        wg_servers = ""
+        # Build Gost servers config
+        gost_servers = ""
         if wg_ports:
             for i, port in enumerate(wg_ports, 1):
                 if i == 1:
-                    wg_servers += f"    server wg{i} 127.0.0.1:{port} check inter 1s rise 1 fall 2 on-error fastinter\n"
+                    gost_servers += f"    server gost{i} 127.0.0.1:{port} check inter 1s rise 1 fall 2 on-error fastinter\n"
                 else:
-                    wg_servers += f"    server wg{i} 127.0.0.1:{port} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
+                    gost_servers += f"    server gost{i} 127.0.0.1:{port} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
         
         # Create HAProxy config
         config_content = f"""global
@@ -862,7 +931,7 @@ backend socks_back_{sock_port}
     balance first
     option tcp-check
     tcp-check connect
-{wg_servers}    server cloudflare_warp 127.0.0.1:8111 check inter 1s rise 1 fall 2 on-error fastinter backup
+{gost_servers}    server cloudflare_warp 127.0.0.1:8111 check inter 1s rise 1 fall 2 on-error fastinter backup
 
 listen stats_{sock_port}
     bind 0.0.0.0:{stats_port}
@@ -879,11 +948,14 @@ listen stats_{sock_port}
         with open(config_file, 'w') as f:
             f.write(config_content)
         
-        # Calculate corresponding gost port
-        # HAProxy port 7891 -> Gost port 18181
-        # HAProxy port 7892 -> Gost port 18182
-        # Formula: gost_port = 18181 + (haproxy_port - 7891)
-        gost_port = 18181 + (sock_port - 7891)
+        # Calculate corresponding gost port dynamically
+        # Find available gost ports and map to HAProxy port
+        available_gost_ports = get_available_gost_ports()
+        if available_gost_ports:
+            # Use first available gost port or calculate based on HAProxy port
+            gost_port = int(available_gost_ports[0]) if len(available_gost_ports) == 1 else 18181 + (sock_port - 7891)
+        else:
+            gost_port = 18181 + (sock_port - 7891)
         
         # Create gost config with random server if no specific country
         gost_config_created = False
@@ -928,7 +1000,18 @@ listen stats_{sock_port}
             except Exception as e:
                 print(f"⚠️  Failed to create gost config: {e}")
         
-        # Start the HAProxy instance using setup_haproxy.sh in background
+        # Start Gost services for the backend ports
+        if wg_ports:
+            for port in wg_ports:
+                # Start gost service for this port
+                gost_cmd = f'bash manage_gost.sh restart-port {port}'
+                gost_result = run_command(gost_cmd)
+                if gost_result['success']:
+                    print(f"✅ Started gost service on port {port}")
+                else:
+                    print(f"⚠️  Failed to start gost service on port {port}: {gost_result['stderr']}")
+        
+        # Start the HAProxy service using setup_haproxy.sh in background
         wg_ports_str = ','.join(map(str, wg_ports)) if wg_ports else '18181'
         log_file = os.path.join(LOG_DIR, f'haproxy_health_{sock_port}.log')
         
@@ -1020,25 +1103,60 @@ def api_haproxy_delete(port):
             try:
                 with open(pid_file) as f:
                     pid = int(f.read().strip())
-                os.kill(pid, 15)  # SIGTERM
+                # Check if process is still running
+                try:
+                    os.kill(pid, 0)  # Check if process exists
+                    os.kill(pid, 15)  # SIGTERM
+                    print(f"✅ Stopped HAProxy process {pid}")
+                except OSError:
+                    print(f"⚠️  HAProxy process {pid} not running, removing stale PID file")
                 os.remove(pid_file)
-            except (OSError, ValueError):
-                pass
+            except (OSError, ValueError) as e:
+                print(f"⚠️  Error handling HAProxy PID file: {e}")
+                # Remove stale PID file
+                try:
+                    os.remove(pid_file)
+                except:
+                    pass
         
         # Stop health monitor
         if os.path.exists(health_pid_file):
             try:
                 with open(health_pid_file) as f:
                     pid = int(f.read().strip())
-                os.kill(pid, 15)  # SIGTERM
+                # Check if process is still running
+                try:
+                    os.kill(pid, 0)  # Check if process exists
+                    os.kill(pid, 15)  # SIGTERM
+                    print(f"✅ Stopped health monitor process {pid}")
+                except OSError:
+                    print(f"⚠️  Health monitor process {pid} not running, removing stale PID file")
                 os.remove(health_pid_file)
-            except (OSError, ValueError):
-                pass
+            except (OSError, ValueError) as e:
+                print(f"⚠️  Error handling health monitor PID file: {e}")
+                # Remove stale PID file
+                try:
+                    os.remove(health_pid_file)
+                except:
+                    pass
+        
+        # Kill any process still running on the port
+        result = run_command(f'lsof -ti :{port}')
+        if result['success'] and result['stdout'].strip():
+            pids = result['stdout'].strip().split('\n')
+            for pid in pids:
+                if pid.strip():
+                    try:
+                        run_command(f'kill -9 {pid.strip()}')
+                        print(f"✅ Killed process {pid.strip()} on port {port}")
+                    except:
+                        pass
         
         # Remove config file
         config_file = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
         if os.path.exists(config_file):
             os.remove(config_file)
+            print(f"✅ Removed config file: {config_file}")
         
         # Clean up log files
         log_file = os.path.join(LOG_DIR, f'haproxy_health_{port}.log')
@@ -1064,19 +1182,16 @@ def api_haproxy_delete(port):
 def api_gost_delete(port):
     """Xóa Gost theo port"""
     try:
-        # Validate port
-        if port not in ['18181', '18182', '18183', '18184', '18185', '18186', '18187']:
+        # Validate port using dynamic port discovery
+        available_ports = get_available_gost_ports()
+        if port not in available_ports:
             return jsonify({
                 'success': False, 
-                'error': f'Invalid port. Available ports: 18181-18187'
+                'error': f'Invalid port. Available ports: {", ".join(available_ports)}'
             }), 400
         
-        # Get instance for this port
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
-        
         # Stop the service first if running
-        pid_file = os.path.join(LOG_DIR, f'gost{instance}.pid')
+        pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
         if os.path.exists(pid_file):
             try:
                 with open(pid_file) as f:
@@ -1090,18 +1205,18 @@ def api_gost_delete(port):
         run_command(f'lsof -ti :{port} | xargs kill -9 2>/dev/null || true')
         
         # Remove config file
-        config_file = os.path.join(LOG_DIR, f'gost{instance}.config')
+        config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
         if os.path.exists(config_file):
             os.remove(config_file)
         
         # Clean up log files
-        log_file = os.path.join(LOG_DIR, f'gost{instance}.log')
+        log_file = os.path.join(LOG_DIR, f'gost_{port}.log')
         if os.path.exists(log_file):
             os.remove(log_file)
         
         return jsonify({
             'success': True,
-            'message': f'Gost {instance} (port {port}) deleted successfully'
+            'message': f'Gost port {port} deleted successfully'
         })
         
     except Exception as e:
@@ -1135,25 +1250,24 @@ def api_get_logs(service):
     # Dynamic log file mapping
     log_file = None
     
-    # Check for gost logs (gost1, gost2, etc.)
+    # Check for gost logs (gost_PORT or gost1, gost2, etc.)
     if service.startswith('gost'):
-        # Extract instance number from service name (e.g., gost1 -> 1)
-        instance = service.replace('gost', '')
-        if instance.isdigit():
-            log_file = f'gost{instance}.log'
+        # Extract port from service name
+        port_or_instance = service.replace('gost', '')
+        if port_or_instance.isdigit():
+            # Check if it's a port (4+ digits) or instance (1-2 digits)
+            if len(port_or_instance) >= 4:  # Port like 18181, 18182
+                log_file = f'gost_{port_or_instance}.log'
+            else:  # Instance like 1, 2, 3 (legacy)
+                log_file = f'gost{port_or_instance}.log'
         else:
-            return jsonify({'success': False, 'error': 'Invalid gost instance'}), 400
+            return jsonify({'success': False, 'error': 'Invalid gost service'}), 400
     # Check for wireproxy logs (legacy support)
     elif service.startswith('wireproxy'):
         # Extract port number from service name (e.g., wireproxy18183 -> 18183)
         port = service.replace('wireproxy', '')
-        # Map port to instance number for new format
-        gost_ports = get_gost_ports()
-        if port in gost_ports:
-            instance = gost_ports.index(port) + 1
-        else:
-            instance = port
-        new_log_file = f'wireproxy{instance}.log'
+        # Use port-based file naming
+        new_log_file = f'wireproxy_{port}.log'
         old_log_file = f'wireproxy_{port}.log'
         
         # Prefer new format if it exists and is newer
@@ -1174,15 +1288,23 @@ def api_get_logs(service):
             log_file = new_log_file  # Default to new format
     # Check for haproxy logs (haproxy1, haproxy2, ... or haproxy7891, haproxy7892, ...)
     elif service.startswith('haproxy'):
-        # Extract port or instance number
+        # Extract port number
         port_or_instance = service.replace('haproxy', '')
         if port_or_instance.isdigit():
             # Check if it's a port (4 digits) or instance (1-2 digits)
             if len(port_or_instance) >= 4:  # Port like 7891, 7892, 7893
                 port = port_or_instance
             else:  # Instance like 1, 2, 3
-                port_map = {'1': '7891', '2': '7892', '3': '7893', '4': '7894', '5': '7895'}
-                port = port_map.get(port_or_instance, f'789{port_or_instance}')
+                # Use dynamic port discovery from config files
+                available_ports = get_available_haproxy_ports()
+                try:
+                    instance_num = int(port_or_instance)
+                    if 1 <= instance_num <= len(available_ports):
+                        port = available_ports[instance_num - 1]  # 1-based indexing
+                    else:
+                        port = f'789{port_or_instance}'  # Fallback
+                except (ValueError, IndexError):
+                    port = f'789{port_or_instance}'  # Fallback
             log_file = f'haproxy_health_{port}.log'
     # Check for HTTPS proxy logs
     
@@ -1229,8 +1351,9 @@ def api_reset_gost_configs():
         import os
         import glob
         
-        # Remove all gost config files
-        config_files = glob.glob(os.path.join(LOG_DIR, 'gost*.config'))
+        # Remove all gost config files from config/ directory
+        config_dir = os.path.join(BASE_DIR, 'config')
+        config_files = glob.glob(os.path.join(config_dir, 'gost*.config'))
         removed_count = 0
         
         for config_file in config_files:
@@ -1242,7 +1365,7 @@ def api_reset_gost_configs():
         
         return jsonify({
             'success': True,
-            'message': f'Reset {removed_count} gost config files. Restart gost instances to get new random servers.',
+            'message': f'Reset {removed_count} gost config files. Restart gost services to get new random servers.',
             'removed_count': removed_count
         })
         
@@ -1348,9 +1471,7 @@ def api_nordvpn_apply_server(port):
                 'error': f'Invalid port. Available ports: 18181-18187'
             }), 400
         
-        # Get instance for this port
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
+        # Use port-based management
         
         # Get proxy URL for NordVPN server
         proxy_url = proxy_api.get_nordvpn_proxy(server['hostname'])
@@ -1373,7 +1494,7 @@ def api_nordvpn_apply_server(port):
                 'error': 'Failed to save gost config'
             }), 500
         
-        # Restart gost instance using manage_gost.sh
+        # Restart gost service using manage_gost.sh
         cmd = f'./manage_gost.sh restart-port {port}'
         result = run_command(cmd)
         
@@ -1383,9 +1504,9 @@ def api_nordvpn_apply_server(port):
             
             return jsonify({
                 'success': True,
-                'message': f'Applied NordVPN server {server["name"]} to Gost {instance} (port {port})',
+                'message': f'Applied NordVPN server {server["name"]} to Gost port {port}',
                 'server': server,
-                'instance': instance,
+                'port': port,
                 'port': port,
                 'proxy_url': proxy_url
             })
@@ -1525,9 +1646,7 @@ def api_protonvpn_apply_server(port):
                 'error': f'Invalid port. Available ports: 18181-18187'
             }), 400
         
-        # Get instance for this port
-        gost_ports = get_gost_ports()
-        instance = gost_ports.index(port) + 1
+        # Use port-based management
         
         # Calculate ProtonVPN port based on server label
         # Get label from servers array
@@ -1564,7 +1683,7 @@ def api_protonvpn_apply_server(port):
                 'error': 'Failed to save gost config'
             }), 500
         
-        # Restart gost instance using manage_gost.sh
+        # Restart gost service using manage_gost.sh
         cmd = f'./manage_gost.sh restart-port {port}'
         result = run_command(cmd)
         
@@ -1575,9 +1694,9 @@ def api_protonvpn_apply_server(port):
             name = server.get('name', 'Unknown')
             return jsonify({
                 'success': True,
-                'message': f'Applied ProtonVPN {name} to Gost {instance} (port {port})',
+                'message': f'Applied ProtonVPN {name} to Gost port {port}',
                 'server': server,
-                'instance': instance,
+                'port': port,
                 'port': port,
                 'proxy_url': proxy_url
             })
@@ -1592,6 +1711,20 @@ def api_protonvpn_apply_server(port):
             'success': False,
             'error': str(e)
         }), 500
+
+def _get_proxy_port(server_name, vpn_provider):
+    """Get actual proxy port based on VPN provider and server name"""
+    if vpn_provider == 'nordvpn':
+        return 89
+    elif vpn_provider == 'protonvpn':
+        # Extract server label from server name (e.g., us-ca-10 -> 10)
+        try:
+            server_label = server_name.split('-')[-1]
+            return int(server_label) + 4443
+        except:
+            return 4443  # Default ProtonVPN port
+    else:
+        return 89  # Default
 
 @app.route('/api/chrome/proxy-check', methods=['POST'])
 def api_chrome_proxy_check():
@@ -1668,35 +1801,49 @@ def api_chrome_proxy_check():
                 if len(parts) >= 2:
                     profile_port = parts[1]
                     profile_server = parts[2] if len(parts) >= 3 else ''
+                    profile_proxy_port = parts[3] if len(parts) >= 4 else ''
                     
-                    # Case 1: Exact match - proxy_check matches existing profile
-                    if profile_port == check_port and profile_server == check_server:
+                    # Get expected proxy port for comparison
+                    expected_proxy_port = str(_get_proxy_port(check_server, vpn_provider))
+                    
+                    # Case 1: Exact match - proxy_check matches existing profile (all 3 components)
+                    if (profile_port == check_port and 
+                        profile_server == check_server and 
+                        profile_proxy_port == expected_proxy_port):
                         exact_match_found = True
                         break
                     
-                    # Case 2: Same port but different server
-                    if profile_port == check_port and profile_server != check_server:
+                    # Case 2: Same port but different server or proxy_port
+                    if (profile_port == check_port and 
+                        (profile_server != check_server or profile_proxy_port != expected_proxy_port)):
                         port_in_use_by_other_server = True
                         break
         
         # Case 1: Exact match found
         if exact_match_found:
-            return f'socks5://{client_host}:{check_port}:{check_server}:1'
+            proxy_port = _get_proxy_port(check_server, vpn_provider)
+            return f'socks5://{client_host}:{check_port}:{check_server}:{proxy_port}'
         
         # Case 2: Port in use with different server - try to reuse available HAProxy first
         if port_in_use_by_other_server:
+            print(f"DEBUG: port_in_use_by_other_server = True")
             # First, try to find an available HAProxy that's not in the profiles list
             available_haproxy = _find_available_haproxy(profiles, check_server, vpn_provider)
+            print(f"DEBUG: _find_available_haproxy returned: {available_haproxy}")
             if available_haproxy:
                 # Use the actual server name from available HAProxy (in case of fallback)
                 actual_server = available_haproxy.get('server', check_server)
-                return f'socks5://{client_host}:{available_haproxy["port"]}:{actual_server}:'
+                proxy_port = _get_proxy_port(actual_server, vpn_provider)
+                print(f"DEBUG: Reusing HAProxy port {available_haproxy['port']}")
+                return f'socks5://{client_host}:{available_haproxy["port"]}:{actual_server}:{proxy_port}'
+            else:
+                print("DEBUG: No available HAProxy found, will create new")
             
             # If no available HAProxy found, create new one
             # Find next available port by checking actual HAProxy configs
             existing_ports = set()
             
-            # Check profiles first - parse socks5://host:port:server format
+            # Check profiles first - parse both socks5:// and 127.0.0.1:port:server:proxy_port formats
             for profile in profiles:
                 if profile.get('proxy'):
                     proxy = profile['proxy']
@@ -1705,12 +1852,16 @@ def api_chrome_proxy_check():
                         # Remove socks5:// prefix
                         proxy = proxy[9:]
                         parts = proxy.split(':')
-                        if len(parts) >= 2:
-                            try:
-                                port = int(parts[1])
-                                existing_ports.add(port)
-                            except ValueError:
-                                pass
+                    else:
+                        # Parse 127.0.0.1:port:server:proxy_port format
+                        parts = proxy.split(':')
+                    
+                    if len(parts) >= 2:
+                        try:
+                            port = int(parts[1])
+                            existing_ports.add(port)
+                        except ValueError:
+                            pass
             
             # Check actual HAProxy config files
             import glob
@@ -1721,15 +1872,21 @@ def api_chrome_proxy_check():
                 except (ValueError, IndexError):
                     pass
             
-            # Find next available port starting from 7891 with proper mapping
-            new_port = 7891
-            while new_port in existing_ports or new_port == int(check_port):
-                new_port += 1
-                if new_port > 7999:  # Safety limit
-                    return jsonify({
-                        'success': False,
-                        'error': 'No available ports (limit: 7891-7999)'
-                    }), 500
+            # Find next available port dynamically
+            available_ports = get_available_haproxy_ports()
+            new_port = None
+            
+            # Try to find an available port starting from 7891
+            for port in range(7891, 8000):  # Safety limit 7891-7999
+                if port not in existing_ports and port != int(check_port):
+                    new_port = port
+                    break
+            
+            if new_port is None:
+                return jsonify({
+                    'success': False,
+                    'error': 'No available ports (limit: 7891-7999)'
+                }), 500
             
             # Verify the corresponding wireproxy port is also available
             expected_wireproxy_port = 18181 + (new_port - 7891)
@@ -1739,7 +1896,7 @@ def api_chrome_proxy_check():
                     'error': f'Wireproxy port {expected_wireproxy_port} exceeds limit (18999)'
                 }), 500
             
-            # Create new HAProxy instance
+            # Create new HAProxy service
             result = _create_haproxy_with_server(new_port, check_server, vpn_provider)
             if not result['success']:
                 return jsonify({
@@ -1749,7 +1906,11 @@ def api_chrome_proxy_check():
             
             # Use the actual server name from result (in case of fallback)
             actual_server = result.get('server', check_server)
-            return f'socks5://{client_host}:{new_port}:{actual_server}:'
+            proxy_port = _get_proxy_port(actual_server, vpn_provider)
+            # Use the actual port from result (in case of fallback)
+            actual_port = result.get('port', new_port)
+            print(f"DEBUG: Creating new HAProxy port {actual_port}")
+            return f'socks5://{client_host}:{actual_port}:{actual_server}:{proxy_port}'
         
         # Case 3: Port not in use - check if HAProxy exists and matches server
         haproxy_config = os.path.join(BASE_DIR, 'config', f'haproxy_{check_port}.cfg')
@@ -1772,7 +1933,13 @@ def api_chrome_proxy_check():
                     
                     # Use the actual server name from result (in case of fallback)
                     actual_server = result.get('server', check_server)
-                    return f'socks5://{client_host}:{check_port}:{actual_server}:'
+                    return jsonify({
+                        'success': True,
+                        'proxy': f'socks5://{client_host}:{check_port}:{actual_server}:',
+                        'action': 'reconfigure',
+                        'port': check_port,
+                        'server': actual_server
+                    })
                 else:
                     # Active profiles exist - reconfigure to match requested server
                     result = _reconfigure_haproxy_with_server(check_port, check_server, vpn_provider)
@@ -1784,10 +1951,12 @@ def api_chrome_proxy_check():
                     
                     # Use the actual server name from result (in case of fallback)
                     actual_server = result.get('server', check_server)
-                    return f'socks5://{client_host}:{check_port}:{actual_server}:'
+                    proxy_port = _get_proxy_port(actual_server, vpn_provider)
+                    return f'socks5://{client_host}:{check_port}:{actual_server}:{proxy_port}'
             elif current_server == check_server:
                 # Server matches - just return
-                return f'socks5://{client_host}:{check_port}:{check_server}:'
+                proxy_port = _get_proxy_port(check_server, vpn_provider)
+                return f'socks5://{client_host}:{check_port}:{check_server}:{proxy_port}'
         
         # HAProxy doesn't exist - create new
         result = _create_haproxy_with_server(check_port, check_server, vpn_provider)
@@ -1799,7 +1968,8 @@ def api_chrome_proxy_check():
         
         # Use the actual server name from result (in case of fallback)
         actual_server = result.get('server', check_server)
-        return f'socks5://{client_host}:{check_port}:{actual_server}:'
+        proxy_port = _get_proxy_port(actual_server, vpn_provider)
+        return f'socks5://{client_host}:{check_port}:{actual_server}:{proxy_port}'
         
     except Exception as e:
         return jsonify({
@@ -1832,20 +2002,17 @@ def _find_available_port_for_fallback(original_port):
                     except (ValueError, IndexError):
                         pass
         
-        # Find next available port starting from 7891
-        fallback_port = 7891
-        while fallback_port in existing_ports or fallback_port == original_port:
-            fallback_port += 1
-            if fallback_port > 7999:  # Safety limit
-                return None
+        # Find next available port dynamically
+        fallback_port = None
         
-        # If original port is 7891, start from 7892 to avoid conflict
-        if original_port == 7891:
-            fallback_port = 7892
-            while fallback_port in existing_ports:
-                fallback_port += 1
-                if fallback_port > 7999:
-                    return None
+        # Try to find an available port starting from 7891
+        for port in range(7891, 8000):  # Safety limit 7891-7999
+            if port not in existing_ports and port != original_port:
+                fallback_port = port
+                break
+        
+        if fallback_port is None:
+            return None
         
         # Verify the corresponding wireproxy port is also available
         expected_wireproxy_port = 18181 + (fallback_port - 7891)
@@ -1881,12 +2048,16 @@ def _find_available_haproxy(profiles, target_server, vpn_provider):
                     # Remove socks5:// prefix
                     proxy = proxy[9:]
                     parts = proxy.split(':')
-                    if len(parts) >= 2:
-                        try:
-                            port = int(parts[1])
-                            profile_ports.add(port)
-                        except ValueError:
-                            pass
+                else:
+                    # Parse 127.0.0.1:port:server:proxy_port format
+                    parts = proxy.split(':')
+                
+                if len(parts) >= 2:
+                    try:
+                        port = int(parts[1])
+                        profile_ports.add(port)
+                    except ValueError:
+                        pass
         
         # Find all existing HAProxy configs
         import glob
@@ -2229,6 +2400,8 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                                                 'reason': 'country_match',
                                                 'fallback_port': fallback_port
                                             }
+                                            # Update the port to the actual fallback port used
+                                            result['port'] = fallback_port
                                             return result
                                         else:
                                             # Server doesn't work, clean up and try next
@@ -2270,7 +2443,6 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                 servers = api.fetch_servers()
                 if servers:
                     selected_server = random.choice(servers)
-                    server_name = selected_server['name']
                     
                     # Get domain name instead of display name
                     if 'domain' in selected_server:
@@ -2279,7 +2451,7 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                         server_domain = selected_server['hostname']
                     else:
                         # Fallback to name if no domain field
-                        server_domain = server_name
+                        server_domain = selected_server.get('name', 'unknown')
                     
                     # Find available port for fallback
                     fallback_port = _find_available_port_for_fallback(port)
@@ -2294,6 +2466,8 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
                                 'reason': 'random_fallback',
                                 'fallback_port': fallback_port
                             }
+                            # Update the port to the actual fallback port used
+                            result['port'] = fallback_port
                             return result
                         else:
                             # If creation failed, try next port
@@ -2313,7 +2487,7 @@ def _handle_server_not_found(server_name, original_vpn_provider, port):
         return {'success': False, 'error': f'Fallback logic failed: {str(e)}'}
 
 def _create_haproxy_with_server_direct(port, server_name, vpn_provider):
-    """Tạo HAProxy instance mới với server cụ thể (không có fallback logic)"""
+    """Tạo HAProxy service mới với server cụ thể (không có fallback logic)"""
     try:
         # Get server info from VPN API
         if vpn_provider == 'nordvpn':
@@ -2341,7 +2515,7 @@ def _create_haproxy_with_server_direct(port, server_name, vpn_provider):
         return {'success': False, 'error': str(e)}
 
 def _create_haproxy_with_server(port, server_name, vpn_provider):
-    """Tạo HAProxy instance mới với server cụ thể"""
+    """Tạo HAProxy service mới với server cụ thể"""
     try:
         # Get server info from VPN API
         if vpn_provider == 'nordvpn':
@@ -2395,14 +2569,17 @@ def _create_haproxy_with_server(port, server_name, vpn_provider):
 def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, private_key):
     """Implementation chung cho việc tạo HAProxy với server"""
     try:
-        # Calculate gost port based on HAProxy port mapping
-        # HAProxy port 7891 -> Gost port 18181
-        # HAProxy port 7892 -> Gost port 18182
-        # HAProxy port 7893 -> Gost port 18183
-        # Formula: gost_port = 18181 + (haproxy_port - 7891)
+        # Calculate gost port dynamically based on available ports
         try:
             haproxy_port_num = int(port)
-            gost_port = 18181 + (haproxy_port_num - 7891)
+            available_gost_ports = get_available_gost_ports()
+            
+            # Try to find a matching gost port or calculate one
+            if available_gost_ports:
+                # Use first available gost port or calculate based on HAProxy port
+                gost_port = int(available_gost_ports[0]) if len(available_gost_ports) == 1 else 18181 + (haproxy_port_num - 7891)
+            else:
+                gost_port = 18181 + (haproxy_port_num - 7891)
             
             # Validate port range
             if gost_port < 18181 or gost_port > 18999:
@@ -2428,7 +2605,7 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
             except Exception:
                 pass
         
-        # Get API instance
+        # Get API service
         if vpn_provider == 'nordvpn':
             api = nordvpn_api
         elif vpn_provider == 'protonvpn':
@@ -2514,7 +2691,8 @@ def _create_haproxy_with_server_impl(port, server_name, vpn_provider, server, pr
         
         # Create HAProxy config
         haproxy_config_path = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
-        stats_port = 8000 + int(port) - 7890  # 7891 -> 8091, 7892 -> 8092, etc
+        # Calculate stats port dynamically: HAProxy port + 200
+        stats_port = int(port) + 200
         
         # Generate HAProxy config content
         config_content = f"""global
@@ -2573,8 +2751,8 @@ listen stats_{port}
         if not result['success']:
             # Cleanup gost if HAProxy fails
             try:
-                # Stop gost service
-                run_command(f'./manage_gost.sh stop')
+                # Stop only the specific gost service for this port
+                run_command(f'./manage_gost.sh restart-port {gost_port}')
             except Exception:
                 pass
             return {'success': False, 'error': f'Failed to start HAProxy: {result["stderr"]}'}
@@ -2625,8 +2803,8 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
         
         # Stop and reconfigure gost if found
         if gost_port:
-            # Stop gost service
-            run_command(f'./manage_gost.sh stop')
+            # Stop and reconfigure specific gost service
+            run_command(f'./manage_gost.sh restart-port {gost_port}')
             
             # Wait for port to be released
             import time
@@ -2858,8 +3036,9 @@ def _reconfigure_haproxy_with_server(port, server_name, vpn_provider):
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+
 def _start_health_monitor(haproxy_port, gost_ports):
-    """Start health monitor for HAProxy instance"""
+    """Start health monitor for HAProxy service"""
     try:
         script_path = os.path.join(BASE_DIR, 'setup_haproxy.sh')
         cmd = f'{script_path} --sock-port {haproxy_port} --stats-port {8000 + int(haproxy_port) - 7890} --gost-ports {",".join(map(str, gost_ports))} --daemon'
@@ -2881,8 +3060,8 @@ if __name__ == '__main__':
     print(f"📂 Base Directory: {BASE_DIR}")
     print(f"📝 Log Directory: {LOG_DIR}")
     print(f"🔧 Config Files:")
-    print(f"   - Gost 18181: {os.path.join(LOG_DIR, 'gost_18181.config')}")
-    print(f"   - Gost 18182: {os.path.join(LOG_DIR, 'gost_18182.config')}")
+    print(f"   - Gost 18181: {os.path.join(BASE_DIR, 'config', 'gost_18181.config')}")
+    print(f"   - Gost 18182: {os.path.join(BASE_DIR, 'config', 'gost_18182.config')}")
     print("=" * 60)
     print("🚀 Starting Web UI on http://0.0.0.0:5000")
     print("=" * 60)
