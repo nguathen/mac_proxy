@@ -31,36 +31,29 @@ fi
 # Dừng health monitors
 echo ""
 echo "🛑 Stopping health monitors..."
-if [ -f "logs/health_7891.pid" ]; then
-    pid=$(cat logs/health_7891.pid)
-    kill "$pid" 2>/dev/null && echo "✓ Stopped health monitor for instance 1 (PID $pid)" || true
-    rm -f logs/health_7891.pid
-fi
-
-if [ -f "logs/health_7892.pid" ]; then
-    pid=$(cat logs/health_7892.pid)
-    kill "$pid" 2>/dev/null && echo "✓ Stopped health monitor for instance 2 (PID $pid)" || true
-    rm -f logs/health_7892.pid
-fi
+for pid_file in logs/health_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/health_//')
+        pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null && echo "✓ Stopped health monitor for port $port (PID $pid)" || true
+        rm -f "$pid_file"
+    fi
+done
 
 # Dừng HAProxy processes
 echo ""
 echo "🛑 Stopping HAProxy processes..."
-if [ -f "logs/haproxy_7891.pid" ]; then
-    pid=$(cat logs/haproxy_7891.pid)
-    kill "$pid" 2>/dev/null && echo "✓ Stopped HAProxy instance 1 (PID $pid)" || true
-    rm -f logs/haproxy_7891.pid
-fi
-
-if [ -f "logs/haproxy_7892.pid" ]; then
-    pid=$(cat logs/haproxy_7892.pid)
-    kill "$pid" 2>/dev/null && echo "✓ Stopped HAProxy instance 2 (PID $pid)" || true
-    rm -f logs/haproxy_7892.pid
-fi
+for pid_file in logs/haproxy_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        pid=$(cat "$pid_file")
+        kill "$pid" 2>/dev/null && echo "✓ Stopped HAProxy instance $port (PID $pid)" || true
+        rm -f "$pid_file"
+    fi
+done
 
 # Cleanup any remaining processes
-pkill -f "haproxy.*haproxy_7891.cfg" 2>/dev/null || true
-pkill -f "haproxy.*haproxy_7892.cfg" 2>/dev/null || true
+pkill -f "haproxy.*config/haproxy_" 2>/dev/null || true
 pkill -f "setup_haproxy.sh" 2>/dev/null || true
 
 sleep 1
@@ -70,7 +63,7 @@ echo ""
 echo "🔍 Verifying shutdown..."
 still_running=false
 
-if pgrep -f "haproxy.*haproxy_789[12].cfg" > /dev/null; then
+if pgrep -f "haproxy.*config/haproxy_" > /dev/null; then
     echo "⚠️  Some HAProxy processes still running"
     still_running=true
 fi

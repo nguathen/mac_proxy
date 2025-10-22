@@ -160,8 +160,8 @@ mac_proxy/
 │       └── index.html      # Web UI frontend
 ├── start_webui.sh          # Script khởi động Web UI
 ├── manage_wireproxy.sh     # Script quản lý wireproxy
-├── wg18181.conf            # Wireproxy 1 config
-└── wg18182.conf            # Wireproxy 2 config
+├── wg18181.conf            # Wireproxy 1 config (auto-generated)
+└── wg18182.conf            # Wireproxy 2 config (auto-generated)
 ```
 
 ## 🔒 Bảo mật
@@ -253,7 +253,8 @@ chmod +x kill_ports.sh
 
 ```bash
 # Kiểm tra quyền ghi file
-ls -la wg18181.conf wg18182.conf
+# Kiểm tra config files (nếu có)
+ls -la wg18181.conf wg18182.conf 2>/dev/null || echo "Config files not found - will be created when needed"
 
 # Kiểm tra backup folder
 ls -la *.backup.*

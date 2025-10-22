@@ -11,43 +11,55 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 # Kiểm tra HAProxy processes
 echo ""
 echo "🔧 HAProxy Instances:"
-for port in 7891 7892; do
-    if [ -f "logs/haproxy_${port}.pid" ]; then
-        pid=$(cat "logs/haproxy_${port}.pid")
+for pid_file in logs/haproxy_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        pid=$(cat "$pid_file")
         if kill -0 "$pid" 2>/dev/null; then
             echo "  ✅ Instance on port $port: Running (PID $pid)"
         else
             echo "  ❌ Instance on port $port: Dead (stale PID file)"
         fi
-    else
-        echo "  ❌ Instance on port $port: Not running"
     fi
 done
 
 # Kiểm tra health monitors
 echo ""
 echo "🩺 Health Monitors:"
-for port in 7891 7892; do
-    if [ -f "logs/health_${port}.pid" ]; then
-        pid=$(cat "logs/health_${port}.pid")
+for pid_file in logs/health_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/health_//')
+        pid=$(cat "$pid_file")
         if kill -0 "$pid" 2>/dev/null; then
             echo "  ✅ Monitor for port $port: Running (PID $pid)"
         else
             echo "  ❌ Monitor for port $port: Dead (stale PID file)"
         fi
-    else
-        echo "  ❌ Monitor for port $port: Not running"
     fi
 done
 
 # Kiểm tra listening ports
 echo ""
 echo "🔌 Listening Ports:"
-for port in 7891 7892 8091 8092; do
-    if lsof -i :$port > /dev/null 2>&1 || nc -z 127.0.0.1 $port 2>/dev/null; then
-        echo "  ✅ Port $port: Listening"
-    else
-        echo "  ❌ Port $port: Not listening"
+# Kiểm tra HAProxy ports và stats ports
+for pid_file in logs/haproxy_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        stats_port=$((port + 200))
+        
+        # Kiểm tra HAProxy port
+        if lsof -i :$port > /dev/null 2>&1 || nc -z 127.0.0.1 $port 2>/dev/null; then
+            echo "  ✅ HAProxy port $port: Listening"
+        else
+            echo "  ❌ HAProxy port $port: Not listening"
+        fi
+        
+        # Kiểm tra stats port
+        if lsof -i :$stats_port > /dev/null 2>&1 || nc -z 127.0.0.1 $stats_port 2>/dev/null; then
+            echo "  ✅ Stats port $stats_port: Listening"
+        else
+            echo "  ❌ Stats port $stats_port: Not listening"
+        fi
     fi
 done
 
@@ -86,35 +98,44 @@ fi
 # Test HAProxy endpoints
 echo ""
 echo "🧪 HAProxy Endpoint Tests:"
-for port in 7891 7892; do
-    if nc -z 127.0.0.1 $port 2>/dev/null; then
-        ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
-        if [ "$ip" != "N/A" ]; then
-            echo "  ✅ HAProxy port $port: Working (IP: $ip)"
+for pid_file in logs/haproxy_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        if nc -z 127.0.0.1 $port 2>/dev/null; then
+            ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
+            if [ "$ip" != "N/A" ]; then
+                echo "  ✅ HAProxy port $port: Working (IP: $ip)"
+            else
+                echo "  ⚠️  HAProxy port $port: Port open but proxy not working"
+            fi
         else
-            echo "  ⚠️  HAProxy port $port: Port open but proxy not working"
+            echo "  ❌ HAProxy port $port: Not accessible"
         fi
-    else
-        echo "  ❌ HAProxy port $port: Not accessible"
     fi
 done
 
 # Recent logs
 echo ""
 echo "📝 Recent Health Monitor Logs:"
-for port in 7891 7892; do
-    if [ -f "logs/haproxy_health_${port}.log" ]; then
+for log_file in logs/haproxy_health_*.log; do
+    if [ -f "$log_file" ]; then
+        port=$(basename "$log_file" .log | sed 's/haproxy_health_//')
         echo ""
         echo "  Instance $port (last 3 lines):"
-        tail -n 3 "logs/haproxy_health_${port}.log" | sed 's/^/    /'
+        tail -n 3 "$log_file" | sed 's/^/    /'
     fi
 done
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📈 Stats URLs:"
-echo "   • Instance 1: http://127.0.0.1:8091/haproxy?stats"
-echo "   • Instance 2: http://127.0.0.1:8092/haproxy?stats"
+for pid_file in logs/haproxy_*.pid; do
+    if [ -f "$pid_file" ]; then
+        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        stats_port=$((port + 200))
+        echo "   • Instance $port: http://127.0.0.1:$stats_port/haproxy?stats"
+    fi
+done
 echo "   • Auth: admin:admin123"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 

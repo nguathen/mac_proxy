@@ -14,7 +14,7 @@ Hệ thống proxy đã được tích hợp với NordVPN, cho phép bạn dễ
 
 ## Yêu cầu
 
-PrivateKey của NordVPN phải có sẵn trong file config (`wg18181.conf`, `wg18182.conf`).
+PrivateKey của NordVPN sẽ được tự động tạo khi cần thiết.
 
 ## Sử dụng qua Web UI
 
@@ -215,8 +215,8 @@ Danh sách server được cache trong file `nordvpn_servers_cache.json` với t
 ## Backup
 
 Mỗi khi áp dụng server mới, config cũ sẽ được backup với timestamp:
-- `wg18181.conf.backup.1729267890`
-- `wg18182.conf.backup.1729267891`
+- `wg18181.conf.backup.*` (nếu có)
+- `wg18182.conf.backup.*` (nếu có)
 
 ## Troubleshooting
 
@@ -242,7 +242,8 @@ curl -x socks5h://127.0.0.1:18181 https://api.ipify.org
 ### Private key not found
 Đảm bảo file config có PrivateKey:
 ```bash
-grep PrivateKey wg18181.conf
+# Kiểm tra config hiện tại (nếu có)
+ls -la wg18181.conf wg18182.conf 2>/dev/null || echo "Config files not found"
 ```
 
 ## Quốc gia phổ biến

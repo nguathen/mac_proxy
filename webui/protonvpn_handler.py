@@ -1,0 +1,258 @@
+"""
+ProtonVPN API Handler
+Xử lý các API endpoints liên quan đến ProtonVPN
+"""
+
+from flask import request, jsonify
+import sys
+import os
+
+# Add parent directory to path to import modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from protonvpn_api import ProtonVPNAPI
+from proxy_api import ProxyAPI
+
+# Initialize APIs
+protonvpn_api = None
+proxy_api = None
+
+def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health_check, protonvpn_api_instance, proxy_api_instance):
+    """Đăng ký các routes ProtonVPN với Flask app"""
+    global protonvpn_api, proxy_api
+    protonvpn_api = protonvpn_api_instance
+    proxy_api = proxy_api_instance
+    
+
+    @app.route('/api/protonvpn/servers/formatted')
+    def api_protonvpn_servers_formatted():
+        """Lấy danh sách ProtonVPN servers với format thống nhất"""
+        try:
+            if not protonvpn_api:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN API not configured. Please create protonvpn_credentials.json'
+                }), 400
+            
+            force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+            country_filter = request.args.get('country', None)
+            servers = protonvpn_api.fetch_servers(force_refresh=force_refresh)
+            
+            # Format lại dữ liệu
+            formatted_servers = []
+            for server in servers:
+                # Tính proxy port từ label
+                proxy_port = 4443
+                if 'servers' in server and len(server['servers']) > 0:
+                    try:
+                        label = int(server['servers'][0].get('label', '0'))
+                        proxy_port = 4443 + label
+                    except (ValueError, TypeError):
+                        pass
+                
+                formatted_server = {
+                    'name': server.get('name', ''),
+                    'hostname': server.get('domain', ''),
+                    'country': server.get('country_name', ''),
+                    'country_code': server.get('country_code', ''),
+                    'city': server.get('city', ''),
+                    'ip': server.get('entry_ip', ''),
+                    'load': server.get('load', 0),
+                    'status': '✅ Online' if server.get('load', 0) < 100 else '❌ Offline',
+                    'proxyhost': server.get('domain', ''),
+                    'proxyport': proxy_port
+                }
+                
+                # Filter by country if specified
+                if country_filter:
+                    if formatted_server['country_code'].lower() == country_filter.lower():
+                        formatted_servers.append(formatted_server)
+                else:
+                    formatted_servers.append(formatted_server)
+            
+            return jsonify({
+                'success': True,
+                'servers': formatted_servers,
+                'count': len(formatted_servers)
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    @app.route('/api/protonvpn/countries')
+    def api_protonvpn_countries():
+        """Lấy danh sách quốc gia"""
+        try:
+            if not protonvpn_api:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN API not configured'
+                }), 400
+            
+            countries = protonvpn_api.get_countries()
+            return jsonify({
+                'success': True,
+                'countries': countries
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    @app.route('/api/protonvpn/servers/<country_code>')
+    def api_protonvpn_servers_by_country(country_code):
+        """Lấy servers theo quốc gia"""
+        try:
+            if not protonvpn_api:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN API not configured'
+                }), 400
+            
+            servers = protonvpn_api.get_servers_by_country(country_code)
+            
+            return jsonify({
+                'success': True,
+                'servers': servers,
+                'count': len(servers)
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    @app.route('/api/protonvpn/best')
+    def api_protonvpn_best_server():
+        """Lấy best server"""
+        try:
+            if not protonvpn_api:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN API not configured'
+                }), 400
+            
+            country_code = request.args.get('country')
+            tier = request.args.get('tier', type=int)
+            server = protonvpn_api.get_best_server(country_code, tier)
+            
+            if server:
+                return jsonify({
+                    'success': True,
+                    'server': server
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'No server found'
+                }), 404
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    @app.route('/api/protonvpn/apply/<port>', methods=['POST'])
+    def api_protonvpn_apply_server(port):
+        """Áp dụng ProtonVPN server vào gost port"""
+        try:
+            if not protonvpn_api:
+                return jsonify({'success': False, 'error': 'ProtonVPN API not configured'}), 400
+            
+            data = request.json
+            server_name = data.get('server_name')
+            proxy_host = data.get('proxy_host')
+            proxy_port = data.get('proxy_port')
+            
+            if not server_name:
+                return jsonify({'success': False, 'error': 'No server_name provided'}), 400
+            
+            if not proxy_host or not proxy_port:
+                return jsonify({'success': False, 'error': 'proxy_host and proxy_port are required'}), 400
+            
+            # Get server info
+            server = protonvpn_api.get_server_by_name(server_name)
+            if not server:
+                return jsonify({'success': False, 'error': 'Server not found'}), 404
+            
+            # Validate port - check if it's a valid gost port (18181-18999 range)
+            try:
+                port_num = int(port)
+                if port_num < 18181 or port_num > 18999:
+                    return jsonify({
+                        'success': False, 
+                        'error': f'Invalid port. Port must be between 18181-18999'
+                    }), 400
+            except ValueError:
+                return jsonify({
+                    'success': False, 
+                    'error': 'Invalid port format. Must be a number'
+                }), 400
+            
+            # Use port-based management
+            
+            # Get ProtonVPN auth using dedicated script
+            import subprocess
+            try:
+                # Call get_protonvpn_auth.sh script
+                result = subprocess.run(['./get_protonvpn_auth.sh'], 
+                                      capture_output=True, text=True, timeout=10, 
+                                      cwd='/Volumes/Ssd/Projects/mac_proxy')
+                if result.returncode == 0 and result.stdout.strip():
+                    auth_token = result.stdout.strip()
+                    proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Failed to get ProtonVPN auth token: {result.stderr}'
+                    }), 500
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to get ProtonVPN auth: {str(e)}'
+                }), 500
+            
+            # Save gost config
+            config = {
+                'provider': 'protonvpn',
+                'country': server['domain'],
+                'proxy_url': proxy_url,
+                'port': str(proxy_port)
+            }
+            
+            if not save_gost_config(port, config):
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to save gost config'
+                }), 500
+            
+            # Restart gost service using manage_gost.sh
+            cmd = f'./manage_gost.sh restart-port {port}'
+            result = run_command(cmd)
+            
+            if result['success']:
+                # Trigger health monitor
+                trigger_health_check()
+                
+                name = server.get('name', 'Unknown')
+                return jsonify({
+                    'success': True,
+                    'message': f'Applied ProtonVPN {name} to Gost port {port}',
+                    'server': server,
+                    'port': port,
+                    'proxy_url': proxy_url
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to restart Gost: {result["stderr"]}'
+                }), 500
+                
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500

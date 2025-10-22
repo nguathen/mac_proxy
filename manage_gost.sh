@@ -20,32 +20,18 @@ log() { echo "[$(timestamp)] $*"; }
 get_proxy_info() {
     local provider=$1
     local country=$2
+    local proxy_host=$3
+    local proxy_port=$4
     
     if [ "$provider" = "nordvpn" ]; then
-        # Format: https://user:pass@hostname:port
-        echo "https://USMbUonbFpF9xEx8xR3MHSau:buKKKPURZNMTW7A6rwm3qtBn@${country}:89"
+        # Format: https://user:pass@proxy_host:proxy_port
+        echo "https://USMbUonbFpF9xEx8xR3MHSau:buKKKPURZNMTW7A6rwm3qtBn@${proxy_host}:${proxy_port}"
     elif [ "$provider" = "protonvpn" ]; then
-        # Gọi API để lấy user:pass
-        local api_response=$(curl -s "http://localhost:5267/mmo/getpassproxy" 2>/dev/null || echo "")
-        if [ -n "$api_response" ]; then
-            # Tính port từ server label + 4443
-            # Tìm server trong cache để lấy label chính xác
-            # Ưu tiên lấy label khác "0" nếu có, nếu không thì lấy label đầu tiên
-            local server_label=$(grep -A 5 "\"domain\": \"$country\"" /Volumes/Ssd/Projects/mac_proxy/protonvpn_servers_cache.json | grep '"label": "[^0]' | head -1 | cut -d'"' -f4)
-            if [ -z "$server_label" ]; then
-                # Fallback: lấy label đầu tiên
-                server_label=$(grep -A 5 "\"domain\": \"$country\"" /Volumes/Ssd/Projects/mac_proxy/protonvpn_servers_cache.json | grep '"label":' | head -1 | cut -d'"' -f4)
-            fi
-            if [ -z "$server_label" ]; then
-                # Fallback: tìm số trong country name
-                server_label=$(echo "$country" | grep -o '[0-9]\+' | head -1)
-            fi
-            if [ -z "$server_label" ]; then
-                # Final fallback: default to 0
-                server_label=0
-            fi
-            local port=$((server_label + 4443))
-            echo "https://${api_response}@${country}:${port}"
+        # Lấy auth token từ function riêng
+        local auth_token=$(get_protonvpn_auth)
+        if [ -n "$auth_token" ]; then
+            # Sử dụng proxy_host và proxy_port trực tiếp
+            echo "https://${auth_token}@${proxy_host}:${proxy_port}"
         else
             echo ""
         fi
@@ -60,6 +46,8 @@ save_proxy_config() {
     local provider=$2
     local country=$3
     local proxy_url=$4
+    local proxy_host=$5
+    local proxy_port=$6
     
     local config_file="$CONFIG_DIR/gost_${port}.config"
     cat > "$config_file" <<EOF
@@ -68,10 +56,12 @@ save_proxy_config() {
     "provider": "$provider",
     "country": "$country",
     "proxy_url": "$proxy_url",
+    "proxy_host": "$proxy_host",
+    "proxy_port": "$proxy_port",
     "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
-    log "💾 Saved config for gost port $port: $provider ($country)"
+    log "💾 Saved config for gost port $port: $provider ($country) - $proxy_host:$proxy_port"
 }
 
 # Đọc cấu hình proxy cho port
@@ -86,16 +76,63 @@ load_proxy_config() {
     fi
 }
 
-# Cập nhật proxy URL cho ProtonVPN
-update_protonvpn_credentials() {
-    log "🔄 Updating ProtonVPN credentials..."
-    local api_response=$(curl -s "http://localhost:5267/mmo/getpassproxy" 2>/dev/null || echo "")
-    if [ -n "$api_response" ]; then
-        log "✅ ProtonVPN credentials updated"
+# Lấy auth token cho ProtonVPN (sử dụng script riêng)
+get_protonvpn_auth() {
+    local script_dir="$(dirname "$0")"
+    local auth_token=$("$script_dir/get_protonvpn_auth.sh" 2>/dev/null || echo "")
+    if [ -n "$auth_token" ]; then
+        echo "$auth_token"
+        return 0
     else
-        log "⚠️  Failed to update ProtonVPN credentials (API not available)"
+        echo ""
+        return 1
     fi
-    return 0  # Always return success to continue
+}
+
+
+# Cập nhật auth cho tất cả ProtonVPN services
+update_all_protonvpn_auth() {
+    log "🔄 Updating auth for all ProtonVPN services..."
+    
+    local auth_token=$(get_protonvpn_auth)
+    if [ -z "$auth_token" ]; then
+        log "❌ Failed to get ProtonVPN auth token"
+        return 1
+    fi
+    
+    local updated_count=0
+    
+    # Tìm tất cả ProtonVPN config files
+    for config_file in "$CONFIG_DIR"/gost_*.config; do
+        if [ -f "$config_file" ]; then
+            local provider=$(cat "$config_file" | jq -r '.provider // ""' 2>/dev/null || echo "")
+            if [ "$provider" = "protonvpn" ]; then
+                local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
+                local country=$(cat "$config_file" | jq -r '.country // ""' 2>/dev/null || echo "")
+                local proxy_host=$(cat "$config_file" | jq -r '.proxy_host // ""' 2>/dev/null || echo "")
+                local proxy_port=$(cat "$config_file" | jq -r '.proxy_port // ""' 2>/dev/null || echo "")
+                
+                if [ -n "$proxy_host" ] && [ -n "$proxy_port" ]; then
+                    # Tạo proxy URL mới với auth token mới
+                    local new_proxy_url="https://${auth_token}@${proxy_host}:${proxy_port}"
+                    
+                    # Cập nhật config file
+                    local temp_file=$(mktemp)
+                    cat "$config_file" | jq --arg new_url "$new_proxy_url" '.proxy_url = $new_url' > "$temp_file"
+                    mv "$temp_file" "$config_file"
+                    
+                    log "✅ Updated auth for port $port ($country)"
+                    updated_count=$((updated_count + 1))
+                fi
+            fi
+        fi
+    done
+    
+    if [ $updated_count -gt 0 ]; then
+        log "✅ Updated auth for $updated_count ProtonVPN services"
+    else
+        log "⚠️  No ProtonVPN services found to update"
+    fi
 }
 
 check_and_kill_port() {
@@ -146,8 +183,12 @@ check_and_kill_port() {
 start_gost() {
     log "🚀 Starting gost services..."
     
-    # Cập nhật ProtonVPN credentials trước khi start
-    update_protonvpn_credentials
+    # Test ProtonVPN auth availability
+    if get_protonvpn_auth >/dev/null 2>&1; then
+        log "✅ ProtonVPN auth available"
+    else
+        log "⚠️  ProtonVPN auth not available (API may be down)"
+    fi
     
     # Start services dựa trên config files có sẵn
     for config_file in "$CONFIG_DIR"/gost_*.config; do
@@ -351,6 +392,8 @@ configure_gost() {
     local port=$1
     local provider=$2
     local country=$3
+    local proxy_host=$4
+    local proxy_port=$5
     
     # Validate port format (should be a number)
     if ! [[ "$port" =~ ^[0-9]+$ ]]; then
@@ -363,16 +406,22 @@ configure_gost() {
         return 1
     fi
     
+    # Validate proxy_host and proxy_port
+    if [ -z "$proxy_host" ] || [ -z "$proxy_port" ]; then
+        log "❌ proxy_host and proxy_port are required"
+        return 1
+    fi
+    
     # Lấy proxy URL
-    local proxy_url=$(get_proxy_info "$provider" "$country")
+    local proxy_url=$(get_proxy_info "$provider" "$country" "$proxy_host" "$proxy_port")
     if [ -z "$proxy_url" ]; then
         log "❌ Failed to get proxy info for $provider ($country)"
         return 1
     fi
     
     # Lưu cấu hình
-    save_proxy_config $port "$provider" "$country" "$proxy_url"
-    log "✅ Configured gost port $port: $provider ($country)"
+    save_proxy_config $port "$provider" "$country" "$proxy_url" "$proxy_host" "$proxy_port"
+    log "✅ Configured gost port $port: $provider ($country) - $proxy_host:$proxy_port"
 }
 
 # Hiển thị cấu hình
@@ -448,20 +497,25 @@ case "${1:-}" in
         status_gost
         ;;
     config)
-        if [ $# -lt 4 ]; then
-            echo "Usage: $0 config <port> <provider> <country>"
+        if [ $# -lt 6 ]; then
+            echo "Usage: $0 config <port> <provider> <country> <proxy_host> <proxy_port>"
             echo "  port: 18181-18187"
             echo "  provider: nordvpn, protonvpn"
             echo "  country: server identifier"
+            echo "  proxy_host: proxy hostname"
+            echo "  proxy_port: proxy port"
             exit 1
         fi
-        configure_gost "$2" "$3" "$4"
+        configure_gost "$2" "$3" "$4" "$5" "$6"
         ;;
     show-config)
         show_config "${2:-}"
         ;;
+    update-protonvpn-auth)
+        update_all_protonvpn_auth
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|restart-instance|restart-port|status|config|show-config}"
+        echo "Usage: $0 {start|stop|restart|restart-instance|restart-port|status|config|show-config|update-protonvpn-auth}"
         echo ""
         echo "Commands:"
         echo "  start                    - Start all gost services"
@@ -471,7 +525,8 @@ case "${1:-}" in
         echo "  restart-port <p>         - Restart gost on specific port p"
         echo "  status                   - Show status of all services"
         echo "  config <p> <pr> <c>      - Configure port p with provider pr and country c"
-        echo "  show-config [p]           - Show configuration for port p (or all)"
+        echo "  show-config [p]          - Show configuration for port p (or all)"
+        echo "  update-protonvpn-auth    - Update auth for all ProtonVPN services"
         echo ""
         echo "Examples:"
         echo "  $0 config 18181 protonvpn node-uk-29.protonvpn.net"

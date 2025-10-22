@@ -97,7 +97,7 @@ warp-cli set-proxy-port 8111
 **Cấu hình wireproxy:**
 
 ```bash
-# File wg18181.conf và wg18182.conf đã có sẵn
+# Wireproxy config files (auto-generated when needed)
 # Chỉnh sửa Endpoint trong file config để thay đổi server
 
 # Ví dụ nội dung file:
@@ -265,7 +265,8 @@ bind 127.0.0.1:${SOCK_PORT}  # Chỉ localhost
 
 ```bash
 # Kiểm tra cấu hình
-haproxy -f config/haproxy_7891.cfg -c
+# Kiểm tra cấu hình HAProxy (nếu có)
+ls config/haproxy_*.cfg | head -1 | xargs haproxy -f -c
 
 # Xem logs
 tail -f logs/haproxy_health_7891.log
@@ -343,9 +344,9 @@ mac_proxy/
 ├── stop_all.sh           # Dừng tất cả instances
 ├── status_all.sh         # Kiểm tra trạng thái
 ├── test_proxy.sh         # Test proxy endpoints
-├── config/               # Thư mục cấu hình HAProxy (auto-generated)
-│   ├── haproxy_7891.cfg
-│   └── haproxy_7892.cfg
+├── config/               # Thư mục cấu hình (auto-generated)
+│   ├── haproxy_*.cfg     # HAProxy config files
+│   └── gost_*.config     # Gost config files
 ├── logs/                 # Thư mục logs (auto-generated)
 │   ├── haproxy_7891.pid
 │   ├── haproxy_7892.pid
