@@ -14,8 +14,8 @@ import logging
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider):
-    """Tìm HAProxy và Gost đang rảnh (không được sử dụng bởi profiles)"""
+def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port):
+    """Tìm HAProxy và Gost đang rảnh (không được sử dụng bởi profiles) hoặc có cùng server và port"""
     try:
         # Lấy danh sách HAProxy đang chạy
         status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
@@ -41,7 +41,29 @@ def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider):
                     except ValueError:
                         pass
         
-        # Tìm Gost đang chạy nhưng không được sử dụng bởi profiles
+        # Tìm Gost đang chạy với cùng server và port (ưu tiên cao nhất)
+        for gost in gost_services:
+            if gost.get('running'):
+                gost_port = int(gost['port'])
+                haproxy_port = 7891 + (gost_port - 18181)
+                
+                # Kiểm tra server info từ gost
+                server_info = gost.get('server_info', '')
+                if server_info and ':' in server_info:
+                    gost_server, gost_proxy_port = server_info.split(':', 1)
+                    # Nếu cùng server và proxy port, tái sử dụng
+                    if (gost_server == check_server and 
+                        gost_proxy_port == check_proxy_port and 
+                        haproxy_port not in used_ports):
+                        return {
+                            'port': haproxy_port,
+                            'gost_port': gost_port,
+                            'server': check_server,
+                            'vpn_provider': vpn_provider,
+                            'same_server': True
+                        }
+        
+        # Nếu không tìm thấy cùng server/port, tìm HAProxy rảnh
         for gost in gost_services:
             if gost.get('running'):
                 gost_port = int(gost['port'])
@@ -206,7 +228,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 # 3. Trùng port gost, proxy_host và proxy_port khác nhau thì tạo mới HA và apply gost
                 logging.info(f"[CHROME_PROXY_CHECK] Case 3: Same port, different server")
                 # Trước tiên kiểm tra HAProxy và Gost đang rảnh
-                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider)
+                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port)
                 if available_haproxy:
                     # Sử dụng lại HAProxy đang rảnh
                     haproxy_port = available_haproxy['port']
@@ -330,13 +352,19 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 # 4. Port gost, proxy_host và proxy_port khác nhau, tạo mới HA và apply gost
                 logging.info(f"[CHROME_PROXY_CHECK] Case 4: Different port and server")
                 # Trước tiên kiểm tra HAProxy và Gost đang rảnh
-                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider)
+                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port)
                 if available_haproxy:
                     # Sử dụng lại HAProxy đang rảnh
                     haproxy_port = available_haproxy['port']
                     gost_port = available_haproxy['gost_port']
                     
-                    # Apply Gost với dữ liệu đã phân tích
+                    # Kiểm tra xem có phải cùng server không
+                    if available_haproxy.get('same_server'):
+                        # Cùng server, tái sử dụng trực tiếp
+                        logging.info(f"[CHROME_PROXY_CHECK] Reusing HAProxy {haproxy_port} with same server {check_server}")
+                        return f'socks5://{client_host}:{haproxy_port}:{check_server}:{check_proxy_port}'
+                    
+                    # Khác server, apply Gost với dữ liệu đã phân tích
                     if vpn_provider == 'nordvpn':
                         apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
                     else:
