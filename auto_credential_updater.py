@@ -43,9 +43,18 @@ class AutoCredentialUpdater:
         
     def _monitor_loop(self):
         """Vòng lặp monitoring chính"""
+        last_cleanup = 0
         while self.running:
             try:
+                # Check credentials every 30 seconds
                 self._check_and_update_credentials()
+                
+                # Check for unused services every 5 minutes
+                current_time = time.time()
+                if current_time - last_cleanup >= 300:  # 5 minutes
+                    self._cleanup_unused_services()
+                    last_cleanup = current_time
+                
                 time.sleep(30)  # Check every 30 seconds
             except Exception as e:
                 print(f"❌ Error in monitor loop: {e}")
@@ -197,6 +206,177 @@ class AutoCredentialUpdater:
         except Exception as e:
             print(f"❌ Error restarting gost service on port {port}: {e}")
             
+    def _cleanup_unused_services(self):
+        """Dọn dẹp các service không sử dụng dựa trên profile count API"""
+        try:
+            # Gọi API để lấy danh sách ports đang sử dụng
+            response = requests.get("http://localhost:18112/api/profiles/count-open", timeout=10)
+            if response.status_code != 200:
+                print(f"❌ Failed to get profile count: {response.status_code}")
+                return
+                
+            data = response.json()
+            
+            # API trả về array trực tiếp, không phải object
+            if not isinstance(data, list):
+                print(f"❌ Unexpected API response format: {type(data)}")
+                return
+                
+            # Lấy danh sách ports đang sử dụng
+            used_ports = set()
+            for profile in data:
+                proxy = profile.get('proxy', '')
+                if proxy and ':' in proxy:
+                    # Parse proxy format: "socks5://host:PORT:server" hoặc "127.0.0.1:PORT:server"
+                    parts = proxy.split(':')
+                    if len(parts) >= 2:
+                        try:
+                            # Tìm port trong các phần của proxy string
+                            for part in parts:
+                                if part.isdigit() and 1000 <= int(part) <= 65535:
+                                    port = int(part)
+                                    used_ports.add(port)
+                                    break
+                        except ValueError:
+                            pass
+            
+            print(f"🔍 Found {len(used_ports)} used ports: {sorted(used_ports)}")
+            
+            # Tìm và dọn dẹp các service không sử dụng
+            self._cleanup_unused_gost_services(used_ports)
+            self._cleanup_unused_haproxy_services(used_ports)
+            
+        except Exception as e:
+            print(f"❌ Error in cleanup unused services: {e}")
+            
+    def _cleanup_unused_gost_services(self, used_ports):
+        """Dọn dẹp Gost services không sử dụng"""
+        try:
+            # Tìm tất cả Gost config files
+            for filename in os.listdir(self.config_dir):
+                if filename.startswith("gost_") and filename.endswith(".config"):
+                    port_str = filename[5:-7]  # Remove "gost_" and ".config"
+                    try:
+                        gost_port = int(port_str)
+                        
+                        # Kiểm tra xem Gost này có thuộc về HAProxy đang được sử dụng không
+                        # Mapping: haproxy_port = 7891 + (gost_port - 18181)
+                        haproxy_port = 7891 + (gost_port - 18181)
+                        
+                        # Nếu HAProxy port này đang được sử dụng, thì không xóa Gost
+                        if haproxy_port in used_ports:
+                            print(f"🛡️  Protecting Gost {gost_port} (belongs to HAProxy {haproxy_port})")
+                            continue
+                            
+                        # Nếu Gost port trực tiếp được sử dụng, cũng không xóa
+                        if gost_port in used_ports:
+                            print(f"🛡️  Protecting Gost {gost_port} (directly used)")
+                            continue
+                            
+                        # Nếu không thuộc về HAProxy đang sử dụng và không được sử dụng trực tiếp
+                        print(f"🧹 Cleaning up unused Gost service on port {gost_port}")
+                        self._stop_and_remove_gost_service(gost_port)
+                        
+                    except ValueError:
+                        continue
+        except Exception as e:
+            print(f"❌ Error cleaning up Gost services: {e}")
+            
+    def _cleanup_unused_haproxy_services(self, used_ports):
+        """Dọn dẹp HAProxy services không sử dụng"""
+        try:
+            # Tìm tất cả HAProxy config files
+            for filename in os.listdir(self.config_dir):
+                if filename.startswith("haproxy_") and filename.endswith(".cfg"):
+                    port_str = filename[8:-4]  # Remove "haproxy_" and ".cfg"
+                    try:
+                        port = int(port_str)
+                        if port not in used_ports:
+                            print(f"🧹 Cleaning up unused HAProxy service on port {port}")
+                            self._stop_and_remove_haproxy_service(port)
+                    except ValueError:
+                        continue
+        except Exception as e:
+            print(f"❌ Error cleaning up HAProxy services: {e}")
+            
+    def _stop_and_remove_gost_service(self, port):
+        """Dừng và xóa Gost service"""
+        try:
+            # Stop gost service
+            cmd = f"cd {self.base_dir} && ./manage_gost.sh restart-port {port}"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            
+            # Remove config file
+            config_file = os.path.join(self.config_dir, f"gost_{port}.config")
+            if os.path.exists(config_file):
+                os.remove(config_file)
+                print(f"✅ Removed Gost config for port {port}")
+                
+            # Remove PID file
+            pid_file = os.path.join(self.log_dir, f"gost_{port}.pid")
+            if os.path.exists(pid_file):
+                os.remove(pid_file)
+                
+            # Remove log file
+            log_file = os.path.join(self.log_dir, f"gost_{port}.log")
+            if os.path.exists(log_file):
+                os.remove(log_file)
+                
+            print(f"✅ Cleaned up Gost service on port {port}")
+            
+        except Exception as e:
+            print(f"❌ Error stopping Gost service on port {port}: {e}")
+            
+    def _stop_and_remove_haproxy_service(self, port):
+        """Dừng và xóa HAProxy service"""
+        try:
+            # Stop HAProxy process
+            pid_file = os.path.join(self.log_dir, f"haproxy_{port}.pid")
+            if os.path.exists(pid_file):
+                try:
+                    with open(pid_file, 'r') as f:
+                        pid = int(f.read().strip())
+                    os.kill(pid, 15)  # SIGTERM
+                    print(f"✅ Stopped HAProxy process {pid} on port {port}")
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    os.remove(pid_file)
+            
+            # Stop health monitor
+            health_pid_file = os.path.join(self.log_dir, f"health_{port}.pid")
+            if os.path.exists(health_pid_file):
+                try:
+                    with open(health_pid_file, 'r') as f:
+                        pid = int(f.read().strip())
+                    os.kill(pid, 15)  # SIGTERM
+                    print(f"✅ Stopped health monitor {pid} for port {port}")
+                except (OSError, ValueError):
+                    pass
+                finally:
+                    os.remove(health_pid_file)
+            
+            # Remove config file
+            config_file = os.path.join(self.config_dir, f"haproxy_{port}.cfg")
+            if os.path.exists(config_file):
+                os.remove(config_file)
+                print(f"✅ Removed HAProxy config for port {port}")
+                
+            # Remove log files
+            log_files = [
+                os.path.join(self.log_dir, f"haproxy_{port}.log"),
+                os.path.join(self.log_dir, f"haproxy_health_{port}.log"),
+                os.path.join(self.log_dir, f"last_backend_{port}")
+            ]
+            for log_file in log_files:
+                if os.path.exists(log_file):
+                    os.remove(log_file)
+                    
+            print(f"✅ Cleaned up HAProxy service on port {port}")
+            
+        except Exception as e:
+            print(f"❌ Error stopping HAProxy service on port {port}: {e}")
+
     def manual_update_all(self):
         """Cập nhật thủ công tất cả ProtonVPN credentials"""
         print("🔄 Manual update all ProtonVPN credentials...")
@@ -210,6 +390,11 @@ class AutoCredentialUpdater:
                 print(f"❌ Manual update failed: {result.stderr}")
         except Exception as e:
             print(f"❌ Error in manual update: {e}")
+            
+    def manual_cleanup(self):
+        """Dọn dẹp thủ công tất cả services không sử dụng"""
+        print("🧹 Manual cleanup unused services...")
+        self._cleanup_unused_services()
 
 def signal_handler(signum, frame):
     """Xử lý signal để dừng gracefully"""
@@ -243,13 +428,18 @@ def main():
             # Test mode - check once and exit
             updater._check_and_update_credentials()
             
+        elif command == "cleanup":
+            # Manual cleanup mode
+            updater.manual_cleanup()
+            
         else:
-            print("Usage: python auto_credential_updater.py {start|update|test}")
+            print("Usage: python auto_credential_updater.py {start|update|test|cleanup}")
     else:
-        print("Usage: python auto_credential_updater.py {start|update|test}")
-        print("  start  - Start auto monitoring")
-        print("  update - Manual update all credentials")
-        print("  test   - Test check once")
+        print("Usage: python auto_credential_updater.py {start|update|test|cleanup}")
+        print("  start   - Start auto monitoring")
+        print("  update  - Manual update all credentials")
+        print("  test    - Test check once")
+        print("  cleanup - Manual cleanup unused services")
 
 if __name__ == "__main__":
     main()

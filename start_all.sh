@@ -100,6 +100,12 @@ if [ ! -f config/haproxy_*.cfg ]; then
     echo "   Create config files like: config/haproxy_7891.cfg, config/haproxy_7892.cfg, etc."
 fi
 
+# Khởi động Auto Credential Updater
+echo ""
+echo "🔄 Starting Auto Credential Updater..."
+chmod +x start_auto_updater.sh
+./start_auto_updater.sh start
+
 # Khởi động Web UI
 echo ""
 echo "🌐 Starting Web UI..."
@@ -142,6 +148,11 @@ echo ""
 echo "🌐 Web UI:"
 echo "   • URL: http://127.0.0.1:5000"
 echo "   • Quản lý toàn bộ hệ thống qua giao diện web"
+echo ""
+echo "🔄 Auto Credential Updater:"
+echo "   • Tự động cập nhật credentials mỗi 30 giây"
+echo "   • Tự động dọn dẹp services không sử dụng mỗi 5 phút"
+echo "   • Log: logs/auto_updater.log"
 echo ""
 echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"

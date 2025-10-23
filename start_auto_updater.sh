@@ -76,12 +76,18 @@ case "${1:-}" in
     status)
         status_auto_updater
         ;;
+    cleanup)
+        echo "🧹 Manual cleanup unused services..."
+        cd "$BASE_DIR"
+        python3 auto_credential_updater.py cleanup
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status|cleanup}"
         echo "  start   - Start auto credential updater daemon"
         echo "  stop    - Stop auto credential updater daemon"
         echo "  restart - Restart auto credential updater daemon"
         echo "  status  - Check auto credential updater status"
+        echo "  cleanup - Manual cleanup unused services"
         exit 1
         ;;
 esac

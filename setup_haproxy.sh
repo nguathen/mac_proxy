@@ -86,7 +86,7 @@ check_backend() {
   # Step 2: Test actual SOCKS proxy functionality
   # Try to connect through the proxy to a reliable endpoint
   local start_time=$(date +%s)
-  if curl -s --connect-timeout 2 --max-time 3 -x "socks5h://127.0.0.1:$port" https://1.1.1.1 >/dev/null 2>&1; then
+  if curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$port" https://1.1.1.1 >/dev/null 2>&1; then
     local end_time=$(date +%s)
     local latency=$((end_time - start_time))
     echo "$port,online,${latency}s"
@@ -104,11 +104,11 @@ build_haproxy_cfg() {
   for p in "${GOST_PORTS[@]}"; do
     if [[ "$active_port" == "none" ]]; then
       # All gost servers as backup when forcing WARP
-      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup disabled\n"
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 5s rise 3 fall 5 on-error fastinter backup disabled\n"
     elif [[ "$p" == "$active_port" ]]; then
-      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter\n"
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 5s rise 3 fall 5 on-error fastinter\n"
     else
-      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 1s rise 1 fall 2 on-error fastinter backup\n"
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 5s rise 3 fall 5 on-error fastinter backup\n"
     fi
     i=$((i+1))
   done
@@ -122,11 +122,11 @@ global
 
 defaults
     mode tcp
-    timeout connect 2s
-    timeout client 1m
-    timeout server 1m
-    timeout check 2s
-    retries 2
+    timeout connect 5s
+    timeout client 2m
+    timeout server 2m
+    timeout check 10s
+    retries 3
     option redispatch
     option tcplog
     log global
@@ -140,7 +140,7 @@ backend socks_back_${SOCK_PORT}
     option tcp-check
     tcp-check connect
 $(printf "%b" "$gost_servers")
-    server cloudflare_warp ${HOST_PROXY} check inter 1s rise 1 fall 2 on-error fastinter backup
+    server cloudflare_warp ${HOST_PROXY} check inter 3s rise 2 fall 3 on-error fastinter backup
 
 listen stats_${SOCK_PORT}
     bind 0.0.0.0:${STATS_PORT}

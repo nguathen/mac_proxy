@@ -8,6 +8,16 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📊 HAProxy Multi-Instance System Status"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Kiểm tra Auto Credential Updater
+echo ""
+echo "🔄 Auto Credential Updater:"
+if [ -f "start_auto_updater.sh" ]; then
+    chmod +x start_auto_updater.sh
+    ./start_auto_updater.sh status
+else
+    echo "  ❌ Auto updater script not found"
+fi
+
 # Kiểm tra HAProxy processes
 echo ""
 echo "🔧 HAProxy Instances:"

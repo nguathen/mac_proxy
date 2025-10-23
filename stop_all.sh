@@ -11,6 +11,14 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🛑 Stopping HAProxy Multi-Instance System"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Dừng Auto Credential Updater
+echo ""
+echo "🛑 Stopping Auto Credential Updater..."
+if [ -f "start_auto_updater.sh" ]; then
+    chmod +x start_auto_updater.sh
+    ./start_auto_updater.sh stop
+fi
+
 # Dừng Web UI
 echo ""
 #echo "🛑 Stopping Web UI..."

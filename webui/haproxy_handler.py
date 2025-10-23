@@ -204,9 +204,12 @@ def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_h
 
 defaults
     mode tcp
-    timeout connect 5000ms
-    timeout client 50000ms
-    timeout server 50000ms
+    timeout connect 5s
+    timeout client 2m
+    timeout server 2m
+    timeout check 10s
+    retries 3
+    option redispatch
     option tcplog
     log global
 
@@ -224,12 +227,10 @@ listen stats_{sock_port}
 listen proxy_{sock_port}
     bind 0.0.0.0:{sock_port}
     mode tcp
-    balance roundrobin
+    balance first
     option tcp-check
-    tcp-check connect port 80
-    tcp-check send-binary 474554202f20485454502f312e310d0a486f73743a206578616d706c652e636f6d0d0a0d0a
-    tcp-check expect binary 485454502f
-    default-server inter 3s fall 3 rise 2
+    tcp-check connect
+    default-server inter 5s fall 5 rise 3
 """
             
             # Add Gost servers
