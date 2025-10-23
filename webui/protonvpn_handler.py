@@ -209,8 +209,59 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                 if not all_servers:
                     return jsonify({'success': False, 'error': 'No servers available'}), 404
                 
+                # Get list of currently used proxies to avoid duplicates
+                used_proxies = set()
+                try:
+                    import requests
+                    response = requests.get("http://localhost:18112/api/profiles/list-proxy", timeout=5)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, dict) and 'data' in data:
+                            # API returns {"success": true, "data": ["host:port", ...]}
+                            proxy_list = data.get('data', [])
+                            for proxy_string in proxy_list:
+                                if ':' in proxy_string:
+                                    used_proxies.add(proxy_string)
+                        elif isinstance(data, list):
+                            # Fallback: API returns list of profiles
+                            for profile in data:
+                                proxy = profile.get('proxy', '')
+                                if proxy and ':' in proxy:
+                                    # Extract host:port from proxy string
+                                    parts = proxy.split(':')
+                                    if len(parts) >= 2:
+                                        try:
+                                            host = parts[0].replace('socks5://', '').replace('https://', '')
+                                            port = int(parts[1])
+                                            used_proxies.add(f"{host}:{port}")
+                                        except (ValueError, IndexError):
+                                            pass
+                except Exception as e:
+                    print(f"Warning: Could not get used proxies: {e}")
+                
+                # Filter out servers that are already in use
+                available_servers = []
+                for server in all_servers:
+                    server_domain = server.get('domain', '')
+                    server_port = 4443
+                    if 'servers' in server and len(server['servers']) > 0:
+                        try:
+                            label = int(server['servers'][0].get('label', '0'))
+                            server_port = 4443 + label
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    proxy_key = f"{server_domain}:{server_port}"
+                    if proxy_key not in used_proxies:
+                        available_servers.append(server)
+                
+                # If no available servers, use all servers (fallback)
+                if not available_servers:
+                    print("Warning: All servers are in use, selecting from all servers")
+                    available_servers = all_servers
+                
                 import random
-                server = random.choice(all_servers)
+                server = random.choice(available_servers)
                 proxy_host = server.get('domain', '')
                 # Calculate proxy port from label
                 proxy_port = 4443

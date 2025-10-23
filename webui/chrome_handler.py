@@ -150,7 +150,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 apply_data = {}
             
             # Determine VPN provider from server name
-            vpn_provider = 'protonvpn'
+            vpn_provider = 'nordvpn'
             #if 'nordvpn' in check_server.lower():
             #    vpn_provider = 'nordvpn'
             #elif 'protonvpn' in check_server.lower():
