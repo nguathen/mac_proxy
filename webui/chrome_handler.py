@@ -110,30 +110,42 @@ def _determine_smart_vpn_provider(check_server, profiles):
             elif any(pattern in check_server.lower() for pattern in ['protonvpn', '.protonvpn.net']):
                 return 'protonvpn'
         
-        # 2. Nếu là country code (2 ký tự), ưu tiên ProtonVPN
+        # 2. Nếu là country code (2 ký tự), cân bằng theo tỉ lệ 7:3
         if check_server and len(check_server) == 2 and check_server.isalpha():
-            # Ưu tiên ProtonVPN vì không giới hạn kết nối
-            if nordvpn_connections >= 8:  # Gần đạt giới hạn NordVPN
+            # Kiểm tra giới hạn kết nối trước
+            if nordvpn_connections >= 10:  # NordVPN đã đạt giới hạn
                 return 'protonvpn'
-            elif protonvpn_connections >= 5:  # Nếu ProtonVPN đã có nhiều kết nối
-                return 'nordvpn'  # Cân bằng
-            else:
-                return 'protonvpn'  # Ưu tiên ProtonVPN
+            elif protonvpn_connections >= 15:  # ProtonVPN có quá nhiều kết nối
+                return 'nordvpn'
+            
+            # Cân bằng theo tỉ lệ 7:3 (ProtonVPN:NordVPN)
+            import random
+            if random.random() < 0.7:  # 70% chance cho ProtonVPN
+                return 'protonvpn'
+            else:  # 30% chance cho NordVPN
+                return 'nordvpn'
         
-        # 3. Random server case - ưu tiên ProtonVPN
+        # 3. Random server case - cân bằng theo tỉ lệ 7:3
         if not check_server or check_server == '' or check_server is None:
             # Kiểm tra giới hạn kết nối
             if nordvpn_connections >= 10:  # NordVPN đã đạt giới hạn
                 return 'protonvpn'
-            elif nordvpn_connections >= 8:  # Gần đạt giới hạn NordVPN
-                return 'protonvpn'  # Ưu tiên ProtonVPN
-            elif protonvpn_connections >= 10:  # ProtonVPN có nhiều kết nối
-                return 'nordvpn'  # Cân bằng
-            else:
-                return 'protonvpn'  # Ưu tiên ProtonVPN (unlimited)
+            elif protonvpn_connections >= 15:  # ProtonVPN có quá nhiều kết nối
+                return 'nordvpn'
+            
+            # Cân bằng theo tỉ lệ 7:3 (ProtonVPN:NordVPN)
+            import random
+            if random.random() < 0.7:  # 70% chance cho ProtonVPN
+                return 'protonvpn'
+            else:  # 30% chance cho NordVPN
+                return 'nordvpn'
         
-        # 4. Fallback: Ưu tiên ProtonVPN
-        return 'protonvpn'
+        # 4. Fallback: Cân bằng theo tỉ lệ 7:3
+        import random
+        if random.random() < 0.7:  # 70% chance cho ProtonVPN
+            return 'protonvpn'
+        else:  # 30% chance cho NordVPN
+            return 'nordvpn'
         
     except Exception as e:
         print(f"Error determining VPN provider: {e}")

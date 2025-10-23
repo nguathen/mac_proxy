@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HAProxy & Wireproxy Manager</title>
+    <title>HAProxy & Gost Manager</title>
     <style>
         * {
             margin: 0;
@@ -300,19 +300,19 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 HAProxy & Wireproxy Manager</h1>
+            <h1>🚀 HAProxy & Gost Manager</h1>
             <p>Quản lý proxy system của bạn</p>
         </div>
         
         <div class="grid">
-            <!-- Wireproxy Card -->
+            <!-- Gost Card -->
             <div class="card">
                 <h2>🔐 Gost Services</h2>
-                <div id="wireproxy-status"></div>
+                <div id="gost-status"></div>
                 <div class="btn-group">
-                    <button class="btn btn-success" onclick="controlWireproxy('start')">Start All</button>
-                    <button class="btn btn-danger" onclick="controlWireproxy('stop')">Stop All</button>
-                    <button class="btn btn-warning" onclick="controlWireproxy('restart')">Restart All</button>
+                    <button class="btn btn-success" onclick="controlGost('start')">Start All</button>
+                    <button class="btn btn-danger" onclick="controlGost('stop')">Stop All</button>
+                    <button class="btn btn-warning" onclick="controlGost('restart')">Restart All</button>
                 </div>
             </div>
             
@@ -345,7 +345,7 @@
         <!-- NordVPN Management -->
         <div class="card">
             <h2>🌍 NordVPN Server Selection</h2>
-            <p style="color: #666; margin-bottom: 15px;">Chọn server NordVPN và áp dụng vào wireproxy port</p>
+            <p style="color: #666; margin-bottom: 15px;">Chọn server NordVPN và áp dụng vào gost port</p>
             
             <div class="config-field">
                 <label>Select Country:</label>
@@ -373,15 +373,11 @@
                 <button class="btn btn-info" onclick="loadNordVPNServers(true)">Refresh Servers</button>
             </div>
         </div>
-        
+        <br>
         <!-- ProtonVPN Management -->
         <div class="card">
             <h2>🔐 ProtonVPN Server Selection</h2>
             <p style="color: #666; margin-bottom: 15px;">Chọn ProtonVPN server và áp dụng vào proxy port</p>
-            <div style="background: #d1ecf1; border: 1px solid #0dcaf0; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9em;">
-                ℹ️ <strong>Wireproxy:</strong> WireGuard tunnel (SOCKS5)<br>
-                ℹ️ <strong>HTTPS Proxy:</strong> Direct connection với domain (HTTP/HTTPS)
-            </div>
             
             <div class="config-field">
                 <label>Select Country:</label>
@@ -484,7 +480,7 @@
             document.getElementById('protonvpn-server').addEventListener('change', onProtonVPNServerChange);
         });
         
-        let currentWireproxyInstances = [];
+        let currentGostInstances = [];
         let currentHttpsProxyInstances = [];
         
         async function loadStatus() {
@@ -493,13 +489,13 @@
                 const data = await response.json();
                 
                 // Store current ports for VPN server selection
-                currentWireproxyInstances = data.gost;
+                currentGostInstances = data.gost;
                 
                 // Update VPN server selection buttons
                 updateVPNButtons();
                 
-                // Update Wireproxy status
-                const wireproxyHtml = data.gost.map((wp, idx) => {
+                // Update Gost status
+                const gostHtml = data.gost.map((wp, idx) => {
                     return `
                     <div class="service-item">
                         <div class="service-header">
@@ -514,19 +510,19 @@
                         ${wp.server_info ? `<div class="service-info">Server: ${wp.server_info}</div>` : ''}
                         ${wp.pid ? `<div class="service-info">PID: ${wp.pid}</div>` : ''}
                         <div class="btn-group">
-                            ${!wp.running ? `<button class="btn btn-success" onclick="controlWireproxyInstance('${wp.port}', 'start')">Start</button>` : ''}
-                            ${wp.running ? `<button class="btn btn-danger" onclick="controlWireproxyInstance('${wp.port}', 'stop')">Stop</button>` : ''}
-                            <button class="btn btn-warning" onclick="controlWireproxyInstance('${wp.port}', 'restart')">Restart</button>
+                            ${!wp.running ? `<button class="btn btn-success" onclick="controlGostInstance('${wp.port}', 'start')">Start</button>` : ''}
+                            ${wp.running ? `<button class="btn btn-danger" onclick="controlGostInstance('${wp.port}', 'stop')">Stop</button>` : ''}
+                            <button class="btn btn-warning" onclick="controlGostInstance('${wp.port}', 'restart')">Restart</button>
                         </div>
                         <div class="btn-group" style="margin-top: 10px;">
                             <button class="btn btn-info" onclick="testProxy('${wp.port}')">Test</button>
-                            <button class="btn btn-primary" onclick="viewLogs('wireproxy${wp.port}')">Logs</button>
+                            <button class="btn btn-primary" onclick="viewLogs('gost${wp.port}')">Logs</button>
                             <button class="btn btn-primary" onclick="openConfigModal('${wp.port}')">Config</button>
-                            ${!wp.running ? `<button class="btn btn-danger" onclick="deleteWireproxy('${wp.port}', '${wp.port}')">Delete</button>` : ''}
+                            ${!wp.running ? `<button class="btn btn-danger" onclick="deleteGost('${wp.port}', '${wp.port}')">Delete</button>` : ''}
                         </div>
                     </div>
                 `}).join('');
-                document.getElementById('wireproxy-status').innerHTML = wireproxyHtml;
+                document.getElementById('gost-status').innerHTML = gostHtml;
                 
                 
                 // Update HAProxy status
@@ -557,8 +553,8 @@
             }
         }
         
-        async function controlWireproxy(action) {
-            if (!confirm(`Are you sure you want to ${action} all wireproxy ports?`)) return;
+        async function controlGost(action) {
+            if (!confirm(`Are you sure you want to ${action} all gost ports?`)) return;
             
             try {
                 const response = await fetch(`/api/gost/${action}`, { 
@@ -575,19 +571,19 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert(`Wireproxy ${action} successful!`);
+                    alert(`Gost ${action} successful!`);
                     loadStatus();
                 } else {
                     alert(`Error: ${data.error}`);
                 }
             } catch (error) {
-                console.error('Wireproxy control error:', error);
+                console.error('Gost control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
         
-        async function controlWireproxyInstance(port, action) {
-            if (!confirm(`Are you sure you want to ${action} Wireproxy on port ${port}?`)) return;
+        async function controlGostInstance(port, action) {
+            if (!confirm(`Are you sure you want to ${action} Gost on port ${port}?`)) return;
             
             try {
                 const response = await fetch(`/api/gost/${port}/${action}`, { 
@@ -604,13 +600,13 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert(`${data.message || 'Wireproxy ' + action + ' successful!'}`);
+                    alert(`${data.message || 'Gost ' + action + ' successful!'}`);
                     loadStatus();
                 } else {
                     alert(`Error: ${data.error}`);
                 }
             } catch (error) {
-                console.error('Wireproxy control error:', error);
+                console.error('Gost control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
@@ -708,15 +704,15 @@
                 }
                 
                 // Show success message
-                document.getElementById('config-alert').innerHTML = '<div class="alert alert-success">Config saved! Restarting wireproxy...</div>';
+                document.getElementById('config-alert').innerHTML = '<div class="alert alert-success">Config saved! Restarting gost...</div>';
                 
-                // Restart only the specific wireproxy port
+                // Restart only the specific gost port
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const restartResponse = await fetch(`/api/gost/${currentInstance}/restart`, { method: 'POST' });
                 const restartData = await restartResponse.json();
                 
                 if (restartData.success) {
-                    alert(`Config saved and Wireproxy ${currentInstance} restarted successfully!`);
+                    alert(`Config saved and Gost ${currentInstance} restarted successfully!`);
                     closeConfigModal();
                     loadStatus();
                 } else {
@@ -768,16 +764,16 @@
         // Update VPN server selection buttons dynamically
         function updateVPNButtons() {
             // Update NordVPN buttons
-            const nordvpnButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
-                return `<button class="btn btn-success" onclick="applyNordVPNServer('${wp.port}')">Apply to Wireproxy Port ${wp.port}</button>`;
+            const nordvpnButtonsHtml = currentGostInstances.map((wp, idx) => {
+                return `<button class="btn btn-success" onclick="applyNordVPNServer('${wp.port}')">Apply to Gost Port ${wp.port}</button>`;
             }).join('');
             document.getElementById('nordvpn-apply-buttons').innerHTML = nordvpnButtonsHtml;
             
-            // Update ProtonVPN Wireproxy buttons
-            const protonWireproxyButtonsHtml = currentWireproxyInstances.map((wp, idx) => {
-                return `<button class="btn btn-success" onclick="applyProtonVPNServer('${wp.port}', 'wireproxy')">Apply to Wireproxy Port ${wp.port}</button>`;
+            // Update ProtonVPN Gost buttons
+            const protonGostButtonsHtml = currentGostInstances.map((wp, idx) => {
+                return `<button class="btn btn-success" onclick="applyProtonVPNServer('${wp.port}', 'gost')">Apply to Gost Port ${wp.port}</button>`;
             }).join('');
-            document.getElementById('protonvpn-wireproxy-buttons').innerHTML = protonWireproxyButtonsHtml;
+            document.getElementById('protonvpn-wireproxy-buttons').innerHTML = protonGostButtonsHtml;
             
         }
         
@@ -911,7 +907,7 @@
             const selectedOption = serverSelect.options[serverSelect.selectedIndex];
             const serverData = JSON.parse(selectedOption.dataset.serverData);
             
-            if (!confirm(`Apply NordVPN server "${serverName}" to Wireproxy port ${port}?\n\nThis will restart the wireproxy port.`)) {
+            if (!confirm(`Apply NordVPN server "${serverName}" to Gost port ${port}?\n\nThis will restart the gost port.`)) {
                 return;
             }
             
@@ -1040,7 +1036,7 @@
             document.getElementById('protonvpn-server-info').style.display = 'block';
         }
         
-        async function applyProtonVPNServer(port, type = 'wireproxy') {
+        async function applyProtonVPNServer(port, type = 'gost') {
             const serverSelect = document.getElementById('protonvpn-server');
             const serverName = serverSelect.value;
             
@@ -1057,7 +1053,7 @@
             let apiUrl = '';
             
             // Use port directly
-            confirmMsg = `Apply ProtonVPN server "${serverName}" to Wireproxy port ${port}?\n\nThis will create WireGuard tunnel.`;
+            confirmMsg = `Apply ProtonVPN server "${serverName}" to Gost port ${port}?\n\nThis will create Gost tunnel.`;
             apiUrl = `/api/protonvpn/apply/${port}`;
             
             if (!confirm(confirmMsg)) {
@@ -1096,13 +1092,13 @@
                         message += `Test with:\n`;
                         message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://api.ipify.org`;
                     } else {
-                        // Wireproxy - show SOCKS5 info, use port directly
-                        const wireproxyPort = data.port || port;
-                        message += `Wireproxy Configuration:\n`;
-                        message += `• Type: SOCKS5 (WireGuard tunnel)\n`;
-                        message += `• Local Port: ${wireproxyPort}\n\n`;
+                        // Gost - show SOCKS5 info, use port directly
+                        const gostPort = data.port || port;
+                        message += `Gost Configuration:\n`;
+                        message += `• Type: SOCKS5 (Gost tunnel)\n`;
+                        message += `• Local Port: ${gostPort}\n\n`;
                         message += `Test with:\n`;
-                        message += `curl -x socks5://127.0.0.1:${wireproxyPort} https://api.ipify.org`;
+                        message += `curl -x socks5://127.0.0.1:${gostPort} https://api.ipify.org`;
                     }
                     
                     alert(message);
@@ -1214,7 +1210,7 @@
             }
         }
         
-        async function deleteWireproxy(port, port2) {
+        async function deleteGost(port, port2) {
             if (!confirm(`Are you sure you want to delete Gost on port ${port}?\n\nThis will:\n- Stop the service if running\n- Delete the config file (gost_${port}.config)\n- Clean up log files\n\nThis action cannot be undone!`)) {
                 return;
             }
