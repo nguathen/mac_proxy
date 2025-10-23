@@ -74,6 +74,19 @@ reload_haproxy() {
   fi
 }
 
+# Cleanup function to stop background processes
+cleanup_processes() {
+  local monitor_pid_file="${LOG_DIR}/gost_monitor_${SOCK_PORT}.pid"
+  if [[ -f "$monitor_pid_file" ]]; then
+    local monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null)
+    if [[ -n "$monitor_pid" ]] && kill -0 "$monitor_pid" 2>/dev/null; then
+      kill "$monitor_pid" 2>/dev/null
+      log "🛑 Stopped background gost monitoring (PID: $monitor_pid)"
+    fi
+    rm -f "$monitor_pid_file"
+  fi
+}
+
 check_backend() {
   local port=$1
   
@@ -86,10 +99,31 @@ check_backend() {
   # Step 2: Test actual SOCKS proxy functionality
   # Try to connect through the proxy to a reliable endpoint
   local start_time=$(date +%s)
-  if curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$port" https://1.1.1.1 >/dev/null 2>&1; then
+  
+  # Use faster timeout when checking for recovery from WARP
+  local last_backend_file="${LOG_DIR}/last_backend_${SOCK_PORT}"
+  local last_backend=""
+  [[ -f "$last_backend_file" ]] && last_backend=$(cat "$last_backend_file")
+  
+  local connect_timeout=5
+  local max_time=10
+  
+  if [[ "$last_backend" == "warp" ]]; then
+    # Faster check when trying to recover from WARP
+    connect_timeout=3
+    max_time=6
+  fi
+  
+  if curl -s --connect-timeout $connect_timeout --max-time $max_time -x "socks5h://127.0.0.1:$port" https://1.1.1.1 >/dev/null 2>&1; then
     local end_time=$(date +%s)
     local latency=$((end_time - start_time))
     echo "$port,online,${latency}s"
+    
+    # If gost just came online and we're using WARP, trigger immediate HAProxy update
+    if [[ "$last_backend" == "warp" ]]; then
+      log "⚡ Gost $port just came online - triggering immediate HAProxy update"
+      touch "${LOG_DIR}/trigger_check_${SOCK_PORT}"
+    fi
   else
     # Port is open but proxy is not working (e.g., WireGuard tunnel down)
     echo "$port,degraded,N/A"
@@ -103,8 +137,8 @@ build_haproxy_cfg() {
   
   for p in "${GOST_PORTS[@]}"; do
     if [[ "$active_port" == "none" ]]; then
-      # All gost servers as backup when forcing WARP
-      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 5s rise 3 fall 5 on-error fastinter backup disabled\n"
+      # All gost servers as backup when forcing WARP - use faster check intervals
+      gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 2s rise 2 fall 3 on-error fastinter backup disabled\n"
     elif [[ "$p" == "$active_port" ]]; then
       gost_servers+="    server gost${i} 127.0.0.1:${p} check inter 5s rise 3 fall 5 on-error fastinter\n"
     else
@@ -200,6 +234,12 @@ do_health_check() {
       log "🔄 Backend changed to: gost:$best_port (${best_latency}s)"
       build_haproxy_cfg "$best_port"
       reload_haproxy
+      
+      # If recovering from WARP to Gost, trigger immediate next check for faster detection
+      if [[ "$last_backend" == "warp" ]]; then
+        log "⚡ Gost recovery detected - triggering immediate next check"
+        touch "${LOG_DIR}/trigger_check_${SOCK_PORT}"
+      fi
     else
       log "🔄 Backend changed to: Cloudflare WARP ($HOST_PROXY)"
       build_haproxy_cfg "none"
@@ -208,10 +248,42 @@ do_health_check() {
   fi
 }
 
+# Background gost monitoring function
+monitor_gost_connections() {
+  local last_backend_file="${LOG_DIR}/last_backend_${SOCK_PORT}"
+  local trigger_file="${LOG_DIR}/trigger_check_${SOCK_PORT}"
+  
+  while true; do
+    # Only monitor when using WARP
+    if [[ -f "$last_backend_file" ]] && [[ "$(cat "$last_backend_file")" == "warp" ]]; then
+      # Quick check if any gost port is listening
+      for p in "${GOST_PORTS[@]}"; do
+        if bash -c "exec 3<>/dev/tcp/127.0.0.1/$p && exec 3>&-" 2>/dev/null; then
+          # Port is listening, do a quick proxy test
+          if curl -s --connect-timeout 2 --max-time 3 -x "socks5h://127.0.0.1:$p" https://1.1.1.1 >/dev/null 2>&1; then
+            log "⚡ Gost $p connection detected - triggering immediate HAProxy update"
+            touch "$trigger_file"
+            break
+          fi
+        fi
+      done
+    fi
+    sleep 1  # Check every second when using WARP
+  done
+}
+
 health_loop() {
   log "🩺 Health monitor started (interval ${HEALTH_INTERVAL}s, SOCKS $SOCK_PORT)"
   
   local trigger_file="${LOG_DIR}/trigger_check_${SOCK_PORT}"
+  local last_backend_file="${LOG_DIR}/last_backend_${SOCK_PORT}"
+  local current_interval="${HEALTH_INTERVAL}"
+  
+  # Start background gost monitoring
+  monitor_gost_connections &
+  local monitor_pid=$!
+  echo "$monitor_pid" > "${LOG_DIR}/gost_monitor_${SOCK_PORT}.pid"
+  log "🔍 Started background gost monitoring (PID: $monitor_pid)"
   
   while true; do
     # Check if triggered by file
@@ -224,9 +296,21 @@ health_loop() {
     # Regular check
     do_health_check
     
-    # Sleep with inotify-like behavior (check every 2s instead of 1s)
+    # Dynamic interval based on current backend
+    # If using WARP, check more frequently to detect Gost recovery
+    local last_backend=""
+    [[ -f "$last_backend_file" ]] && last_backend=$(cat "$last_backend_file")
+    
+    if [[ "$last_backend" == "warp" ]]; then
+      current_interval=5  # Check every 5s when using WARP
+      log "🔄 Using WARP - checking Gost servers every 5s for faster recovery"
+    else
+      current_interval="${HEALTH_INTERVAL}"  # Normal interval when using Gost
+    fi
+    
+    # Sleep with inotify-like behavior
     local elapsed=0
-    while (( elapsed < HEALTH_INTERVAL )); do
+    while (( elapsed < current_interval )); do
       sleep 2
       elapsed=$((elapsed + 2))
       
@@ -240,6 +324,9 @@ health_loop() {
     done
   done
 }
+
+### --- Signal handlers ---
+trap 'cleanup_processes; exit 0' INT TERM
 
 ### --- Main ---
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

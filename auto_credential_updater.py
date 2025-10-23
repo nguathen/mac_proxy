@@ -272,6 +272,10 @@ class AutoCredentialUpdater:
                         if gost_port in used_ports:
                             print(f"🛡️  Protecting Gost {gost_port} (directly used)")
                             continue
+                        
+                        # Kiểm tra thời gian tạo trước khi xóa
+                        if not self._should_cleanup_service(gost_port, "gost"):
+                            continue
                             
                         # Nếu không thuộc về HAProxy đang sử dụng và không được sử dụng trực tiếp
                         print(f"🧹 Cleaning up unused Gost service on port {gost_port}")
@@ -292,6 +296,10 @@ class AutoCredentialUpdater:
                     try:
                         port = int(port_str)
                         if port not in used_ports:
+                            # Kiểm tra thời gian tạo trước khi xóa
+                            if not self._should_cleanup_service(port, "haproxy"):
+                                continue
+                                
                             print(f"🧹 Cleaning up unused HAProxy service on port {port}")
                             self._stop_and_remove_haproxy_service(port)
                     except ValueError:
@@ -391,6 +399,58 @@ class AutoCredentialUpdater:
         except Exception as e:
             print(f"❌ Error in manual update: {e}")
             
+    def _should_cleanup_service(self, port, service_type):
+        """Kiểm tra xem có nên cleanup service này không dựa trên thời gian tạo"""
+        try:
+            # Thời gian tối thiểu để service được coi là "cũ" (5 phút)
+            MIN_AGE_MINUTES = 5
+            min_age_seconds = MIN_AGE_MINUTES * 60
+            
+            # Lấy thời gian tạo của config file
+            if service_type == "gost":
+                config_file = os.path.join(self.config_dir, f"gost_{port}.config")
+            elif service_type == "haproxy":
+                config_file = os.path.join(self.config_dir, f"haproxy_{port}.cfg")
+            else:
+                return True  # Nếu không xác định được type, cho phép cleanup
+            
+            if not os.path.exists(config_file):
+                return True  # Nếu config file không tồn tại, cho phép cleanup
+            
+            # Lấy thời gian tạo file
+            file_creation_time = os.path.getctime(config_file)
+            current_time = time.time()
+            age_seconds = current_time - file_creation_time
+            
+            # Kiểm tra thời gian tạo trong config file (nếu có)
+            try:
+                with open(config_file, 'r') as f:
+                    if service_type == "gost":
+                        config = json.load(f)
+                        created_at = config.get('created_at', '')
+                        if created_at:
+                            # Parse ISO format: 2025-10-23T15:00:00Z
+                            from datetime import datetime
+                            try:
+                                config_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                                age_seconds = current_time - config_time.timestamp()
+                            except:
+                                pass
+            except:
+                pass
+            
+            # Nếu service được tạo gần đây (dưới 5 phút), không cleanup
+            if age_seconds < min_age_seconds:
+                print(f"⏰ Protecting {service_type} {port} (created {int(age_seconds/60)} minutes ago, too recent)")
+                return False
+            
+            print(f"⏰ {service_type} {port} is {int(age_seconds/60)} minutes old, safe to cleanup")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error checking service age for {service_type} {port}: {e}")
+            return True  # Nếu có lỗi, cho phép cleanup để tránh tích lũy
+
     def manual_cleanup(self):
         """Dọn dẹp thủ công tất cả services không sử dụng"""
         print("🧹 Manual cleanup unused services...")
