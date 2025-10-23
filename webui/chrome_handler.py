@@ -14,6 +14,131 @@ import logging
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+def _apply_server_with_fallback(gost_port, apply_data, vpn_provider):
+    """
+    Apply server với fallback logic:
+    1. Try primary provider với specific data
+    2. Try primary provider với random server
+    3. Try alternative provider với specific data
+    4. Try alternative provider với random server
+    """
+    # Primary provider
+    if vpn_provider == 'nordvpn':
+        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
+    else:
+        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
+    
+    # Try primary provider với specific data
+    apply_response = requests.post(apply_url, json=apply_data, timeout=15)
+    if apply_response.status_code == 200:
+        return apply_response, vpn_provider
+    
+    # Try primary provider với random server
+    print(f"Server not found, trying random server fallback...")
+    fallback_data = {}  # Empty data for random server
+    fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
+    if fallback_response.status_code == 200:
+        return fallback_response, vpn_provider
+    
+    # Try alternative provider
+    print(f"Primary provider failed, trying alternative provider...")
+    alternative_provider = 'protonvpn' if vpn_provider == 'nordvpn' else 'nordvpn'
+    alternative_url = f'http://127.0.0.1:5000/api/{alternative_provider}/apply/{gost_port}'
+    
+    # Try alternative provider với specific data
+    alt_response = requests.post(alternative_url, json=apply_data, timeout=15)
+    if alt_response.status_code == 200:
+        print(f"✅ Alternative provider {alternative_provider} succeeded")
+        return alt_response, alternative_provider
+    
+    # Try alternative provider với random server
+    alt_random_response = requests.post(alternative_url, json={}, timeout=15)
+    if alt_random_response.status_code == 200:
+        print(f"✅ Alternative provider {alternative_provider} random server succeeded")
+        return alt_random_response, alternative_provider
+    
+    # Final fallback: Try both providers with random server from any country
+    print(f"All specific attempts failed, trying random server from any country...")
+    
+    # Try primary provider with random server from any country
+    primary_random_response = requests.post(apply_url, json={}, timeout=15)
+    if primary_random_response.status_code == 200:
+        print(f"✅ Primary provider {vpn_provider} random server from any country succeeded")
+        return primary_random_response, vpn_provider
+    
+    # Try alternative provider with random server from any country
+    alt_any_random_response = requests.post(alternative_url, json={}, timeout=15)
+    if alt_any_random_response.status_code == 200:
+        print(f"✅ Alternative provider {alternative_provider} random server from any country succeeded")
+        return alt_any_random_response, alternative_provider
+    
+    # All failed
+    return None, None
+
+def _determine_smart_vpn_provider(check_server, profiles):
+    """
+    Xác định VPN provider thông minh dựa trên:
+    1. Server name pattern
+    2. Số lượng kết nối hiện tại
+    3. Giới hạn kết nối (NordVPN: 10, ProtonVPN: unlimited)
+    """
+    try:
+        # Đếm số lượng kết nối hiện tại cho mỗi provider
+        nordvpn_connections = 0
+        protonvpn_connections = 0
+        
+        for profile in profiles:
+            if profile.get('proxy'):
+                proxy_str = profile['proxy']
+                if proxy_str.startswith('socks5://'):
+                    proxy_str = proxy_str[9:]
+                
+                parts = proxy_str.split(':')
+                if len(parts) >= 3:
+                    server = parts[2]
+                    # Kiểm tra pattern để xác định provider
+                    if any(pattern in server.lower() for pattern in ['nordvpn', '.nordvpn.com']):
+                        nordvpn_connections += 1
+                    elif any(pattern in server.lower() for pattern in ['protonvpn', '.protonvpn.net']):
+                        protonvpn_connections += 1
+        
+        # Logic thông minh:
+        # 1. Nếu server name có pattern rõ ràng, sử dụng provider tương ứng
+        if check_server:
+            if any(pattern in check_server.lower() for pattern in ['nordvpn', '.nordvpn.com']):
+                return 'nordvpn'
+            elif any(pattern in check_server.lower() for pattern in ['protonvpn', '.protonvpn.net']):
+                return 'protonvpn'
+        
+        # 2. Nếu là country code (2 ký tự), ưu tiên ProtonVPN
+        if check_server and len(check_server) == 2 and check_server.isalpha():
+            # Ưu tiên ProtonVPN vì không giới hạn kết nối
+            if nordvpn_connections >= 8:  # Gần đạt giới hạn NordVPN
+                return 'protonvpn'
+            elif protonvpn_connections >= 5:  # Nếu ProtonVPN đã có nhiều kết nối
+                return 'nordvpn'  # Cân bằng
+            else:
+                return 'protonvpn'  # Ưu tiên ProtonVPN
+        
+        # 3. Random server case - ưu tiên ProtonVPN
+        if not check_server or check_server == '' or check_server is None:
+            # Kiểm tra giới hạn kết nối
+            if nordvpn_connections >= 10:  # NordVPN đã đạt giới hạn
+                return 'protonvpn'
+            elif nordvpn_connections >= 8:  # Gần đạt giới hạn NordVPN
+                return 'protonvpn'  # Ưu tiên ProtonVPN
+            elif protonvpn_connections >= 10:  # ProtonVPN có nhiều kết nối
+                return 'nordvpn'  # Cân bằng
+            else:
+                return 'protonvpn'  # Ưu tiên ProtonVPN (unlimited)
+        
+        # 4. Fallback: Ưu tiên ProtonVPN
+        return 'protonvpn'
+        
+    except Exception as e:
+        print(f"Error determining VPN provider: {e}")
+        return 'protonvpn'  # Fallback to ProtonVPN
+
 def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port):
     """Tìm HAProxy và Gost đang rảnh (không được sử dụng bởi profiles) hoặc có cùng server và port"""
     try:
@@ -149,18 +274,8 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 # Trường hợp 3: Random server (empty hoặc không parse được)
                 apply_data = {}
             
-            # Determine VPN provider from server name
-            vpn_provider = 'nordvpn'
-            #if 'nordvpn' in check_server.lower():
-            #    vpn_provider = 'nordvpn'
-            #elif 'protonvpn' in check_server.lower():
-            #    vpn_provider = 'protonvpn'
-            #elif len(check_server) == 2:
-            #    # For 2-character server names (country codes), random select VPN provider
-            #    vpn_provider = random.choice(['nordvpn', 'protonvpn'])
-            #else:
-            #    # Random VPN provider for empty/unknown cases
-            #    vpn_provider = random.choice(['nordvpn', 'protonvpn'])
+            # Determine VPN provider intelligently
+            vpn_provider = _determine_smart_vpn_provider(check_server, profiles)
             
             # Lấy danh sách proxy từ profiles
             existing_proxies = []
@@ -235,23 +350,12 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     gost_port = available_haproxy['gost_port']
                     
                     # Apply Gost với dữ liệu đã phân tích
-                    if vpn_provider == 'nordvpn':
-                        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
-                    else:
-                        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
-                    
-                    apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-                    if apply_response.status_code != 200:
-                        # Fallback: try with random server if specific server not found
-                        print(f"Server not found, trying random server fallback...")
-                        fallback_data = {}  # Empty data for random server
-                        fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
-                        if fallback_response.status_code != 200:
-                            return jsonify({
-                                'success': False,
-                                'error': f'Failed to apply server to Gost: {apply_response.text}'
-                            }), 500
-                        apply_response = fallback_response
+                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    if apply_response is None:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Failed to apply server to both providers'
+                        }), 500
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
@@ -294,16 +398,11 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 
                 # Apply Gost với dữ liệu đã phân tích trước
                 gost_port = 18181 + (new_port - 7891)
-                if vpn_provider == 'nordvpn':
-                    apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
-                else:
-                    apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
-                
-                apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-                if apply_response.status_code != 200:
+                apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                if apply_response is None:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to apply server to Gost: {apply_response.text}'
+                        'error': 'Failed to apply server to both providers'
                     }), 500
                 
                 # Parse response để lấy thông tin server thực tế
@@ -365,23 +464,12 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                         return f'socks5://{client_host}:{haproxy_port}:{check_server}:{check_proxy_port}'
                     
                     # Khác server, apply Gost với dữ liệu đã phân tích
-                    if vpn_provider == 'nordvpn':
-                        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
-                    else:
-                        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
-                    
-                    apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-                    if apply_response.status_code != 200:
-                        # Fallback: try with random server if specific server not found
-                        print(f"Server not found, trying random server fallback...")
-                        fallback_data = {}  # Empty data for random server
-                        fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
-                        if fallback_response.status_code != 200:
-                            return jsonify({
-                                'success': False,
-                                'error': f'Failed to apply server to Gost: {apply_response.text}'
-                            }), 500
-                        apply_response = fallback_response
+                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    if apply_response is None:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Failed to apply server to both providers'
+                        }), 500
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
@@ -424,16 +512,11 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 
                 # Apply Gost với dữ liệu đã phân tích trước
                 gost_port = 18181 + (new_port - 7891)
-                if vpn_provider == 'nordvpn':
-                    apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
-                else:
-                    apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
-                
-                apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-                if apply_response.status_code != 200:
+                apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                if apply_response is None:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to apply server to Gost: {apply_response.text}'
+                        'error': 'Failed to apply server to both providers'
                     }), 500
                 
                 # Parse response để lấy thông tin server thực tế
