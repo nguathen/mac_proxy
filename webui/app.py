@@ -512,6 +512,167 @@ def api_logs(service):
             'error': str(e)
         })
 
+@app.route('/api/clear-all', methods=['POST'])
+def api_clear_all():
+    """Clear all Gost and HAProxy services"""
+    try:
+        stopped_services = []
+        deleted_files = []
+        
+        # Get all available ports
+        gost_ports = get_available_gost_ports()
+        haproxy_ports = get_available_haproxy_ports()
+        
+        print(f"🧹 Starting Clear All operation...")
+        print(f"Found {len(gost_ports)} Gost ports: {gost_ports}")
+        print(f"Found {len(haproxy_ports)} HAProxy ports: {haproxy_ports}")
+        
+        # 1. Stop all Gost services
+        for port in gost_ports:
+            try:
+                pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
+                if os.path.exists(pid_file):
+                    try:
+                        with open(pid_file) as f:
+                            pid = int(f.read().strip())
+                        os.kill(pid, 15)  # SIGTERM
+                        stopped_services.append(f"Gost {port} (PID {pid})")
+                        print(f"✓ Stopped Gost {port} (PID {pid})")
+                    except (OSError, ValueError):
+                        pass
+                    finally:
+                        try:
+                            os.remove(pid_file)
+                        except:
+                            pass
+            except Exception as e:
+                print(f"⚠️  Error stopping Gost {port}: {e}")
+        
+        # 2. Stop all HAProxy services
+        for port in haproxy_ports:
+            try:
+                # Stop HAProxy process
+                pid_file = os.path.join(LOG_DIR, f'haproxy_{port}.pid')
+                if os.path.exists(pid_file):
+                    try:
+                        with open(pid_file) as f:
+                            pid = int(f.read().strip())
+                        os.kill(pid, 15)  # SIGTERM
+                        stopped_services.append(f"HAProxy {port} (PID {pid})")
+                        print(f"✓ Stopped HAProxy {port} (PID {pid})")
+                    except (OSError, ValueError):
+                        pass
+                    finally:
+                        try:
+                            os.remove(pid_file)
+                        except:
+                            pass
+                
+                # Stop health monitor process
+                health_pid_file = os.path.join(LOG_DIR, f'health_{port}.pid')
+                if os.path.exists(health_pid_file):
+                    try:
+                        with open(health_pid_file) as f:
+                            pid = int(f.read().strip())
+                        os.kill(pid, 15)  # SIGTERM
+                        stopped_services.append(f"Health Monitor {port} (PID {pid})")
+                        print(f"✓ Stopped Health Monitor {port} (PID {pid})")
+                    except (OSError, ValueError):
+                        pass
+                    finally:
+                        try:
+                            os.remove(health_pid_file)
+                        except:
+                            pass
+            except Exception as e:
+                print(f"⚠️  Error stopping HAProxy {port}: {e}")
+        
+        # 3. Force kill any remaining processes
+        try:
+            import subprocess
+            
+            # Kill any remaining gost processes
+            result = subprocess.run(['pkill', '-f', 'gost'], capture_output=True, text=True)
+            if result.returncode == 0:
+                stopped_services.append("Remaining Gost processes")
+                print("✓ Force killed remaining Gost processes")
+            
+            # Kill any remaining haproxy processes
+            result = subprocess.run(['pkill', '-f', 'haproxy'], capture_output=True, text=True)
+            if result.returncode == 0:
+                stopped_services.append("Remaining HAProxy processes")
+                print("✓ Force killed remaining HAProxy processes")
+                
+        except Exception as e:
+            print(f"⚠️  Error force killing processes: {e}")
+        
+        # 4. Delete all Gost configs and logs
+        for port in gost_ports:
+            files_to_remove = [
+                (os.path.join(BASE_DIR, 'config', f'gost_{port}.config'), f'Gost config {port}'),
+                (os.path.join(LOG_DIR, f'gost_{port}.log'), f'Gost log {port}'),
+                (os.path.join(LOG_DIR, f'gost_{port}.pid'), f'Gost PID {port}')
+            ]
+            
+            for file_path, description in files_to_remove:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        deleted_files.append(description)
+                        print(f"✓ Deleted {description}")
+                    except Exception as e:
+                        print(f"⚠️  Error deleting {description}: {e}")
+        
+        # 5. Delete all HAProxy configs and logs
+        for port in haproxy_ports:
+            files_to_remove = [
+                (os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg'), f'HAProxy config {port}'),
+                (os.path.join(LOG_DIR, f'haproxy_{port}.log'), f'HAProxy log {port}'),
+                (os.path.join(LOG_DIR, f'haproxy_{port}.pid'), f'HAProxy PID {port}'),
+                (os.path.join(LOG_DIR, f'health_{port}.pid'), f'Health PID {port}'),
+                (os.path.join(LOG_DIR, f'haproxy_health_{port}.pid'), f'HAProxy Health PID {port}'),
+                (os.path.join(LOG_DIR, f'haproxy_health_{port}.log'), f'HAProxy Health log {port}'),
+                (os.path.join(LOG_DIR, f'last_backend_{port}'), f'Last backend {port}'),
+                (os.path.join(LOG_DIR, f'trigger_check_{port}'), f'Trigger check {port}')
+            ]
+            
+            for file_path, description in files_to_remove:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        deleted_files.append(description)
+                        print(f"✓ Deleted {description}")
+                    except Exception as e:
+                        print(f"⚠️  Error deleting {description}: {e}")
+        
+        # 6. Wait a moment to ensure processes are stopped
+        import time
+        time.sleep(2)
+        
+        # 7. Final cleanup - remove any remaining lock files
+        try:
+            for port in haproxy_ports:
+                lock_file = os.path.join(LOG_DIR, f'deleted_port_{port}.lock')
+                if os.path.exists(lock_file):
+                    os.remove(lock_file)
+                    deleted_files.append(f"Lock file {port}")
+                    print(f"✓ Removed lock file for port {port}")
+        except Exception as e:
+            print(f"⚠️  Error removing lock files: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'All services cleared successfully! Stopped {len(stopped_services)} services and deleted {len(deleted_files)} files.',
+            'stopped_services': stopped_services,
+            'deleted_files': deleted_files
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 # Helper functions for Chrome handler
 def _get_proxy_port(server_name, vpn_provider):

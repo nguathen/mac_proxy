@@ -255,13 +255,19 @@ build_haproxy_cfg "${GOST_PORTS[0]}"
 reload_haproxy
 
 if $DAEMON_MODE; then
+  # Start health monitor in background
   health_loop &
   HEALTH_PID=$!
   echo "$HEALTH_PID" > "${LOG_DIR}/health_${SOCK_PORT}.pid"
   log "✅ Running in background — Health monitor PID: $HEALTH_PID"
   log "   Log file: $LOG_FILE"
   log "   Stop with: kill $HEALTH_PID"
+  
+  # Exit immediately after starting background process
+  log "🚀 HAProxy daemon started successfully"
+  exit 0
 else
+  # Run health monitor in foreground
   health_loop
 fi
 

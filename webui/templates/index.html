@@ -333,6 +333,15 @@
             </div>
         </div>
         
+        <!-- Clear All Services Card -->
+        <div class="card" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); color: white; margin-bottom: 30px;">
+            <h2 style="color: white;">🧹 Clear All Services</h2>
+            <p style="color: rgba(255,255,255,0.9); margin-bottom: 20px;">Stop and delete all Gost and HAProxy services</p>
+            <div class="btn-group">
+                <button class="btn" style="background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3);" onclick="clearAllServices()">🧹 Clear All Services</button>
+            </div>
+        </div>
+        
         <!-- NordVPN Management -->
         <div class="card">
             <h2>🌍 NordVPN Server Selection</h2>
@@ -1229,6 +1238,44 @@
                 }
             } catch (error) {
                 console.error('Delete Gost error:', error);
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+        
+        async function clearAllServices() {
+            if (!confirm(`🧹 Clear All Services\n\nThis will:\n- Stop ALL Gost services\n- Stop ALL HAProxy services\n- Delete ALL Gost configs and logs\n- Delete ALL HAProxy configs and logs\n\n⚠️ This action cannot be undone!\n\nAre you sure you want to continue?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/clear-all', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let message = `✅ ${data.message}\n\n`;
+                    if (data.stopped_services && data.stopped_services.length > 0) {
+                        message += `Stopped Services:\n${data.stopped_services.join('\n')}\n\n`;
+                    }
+                    if (data.deleted_files && data.deleted_files.length > 0) {
+                        message += `Deleted Files:\n${data.deleted_files.join('\n')}`;
+                    }
+                    alert(message);
+                    loadStatus();
+                } else {
+                    alert(`❌ Error: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Clear All error:', error);
                 alert(`❌ Error: ${error.message}`);
             }
         }

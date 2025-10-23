@@ -240,66 +240,38 @@ listen proxy_{sock_port}
             with open(config_file, 'w') as f:
                 f.write(config_content)
             
-            # Start Gost services first
+            # Start Gost services in background without waiting
             for port in wg_ports:
                 gost_config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
                 if os.path.exists(gost_config_file):
-                    # Start Gost service with longer timeout
-                    gost_result = run_command(f'bash manage_gost.sh restart-port {port}', timeout=90)
-                    if not gost_result['success']:
-                        print(f"Warning: Failed to start Gost on port {port}: {gost_result.get('stderr', 'Unknown error')}")
+                    # Start Gost service in background
+                    import subprocess
+                    subprocess.Popen(f'bash manage_gost.sh restart-port {port}', shell=True, cwd=BASE_DIR,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Start HAProxy service with longer timeout
+            # Start HAProxy service in background without waiting
             command = f'bash setup_haproxy.sh --sock-port {sock_port} --stats-port {stats_port} --gost-ports {",".join(map(str, wg_ports))} --daemon'
             print(f"DEBUG: Running command: {command}")
-            result = run_command(command, timeout=90)
             
-            if result['success']:
-                # Wait a moment for service to start
-                import time
-                time.sleep(2)
-                
-                # Check if service is actually running
-                pid_file = os.path.join(LOG_DIR, f'haproxy_{sock_port}.pid')
-                if os.path.exists(pid_file):
-                    try:
-                        with open(pid_file) as f:
-                            pid = int(f.read().strip())
-                        os.kill(pid, 0)  # Check if process exists
-                        return jsonify({
-                            'success': True,
-                            'message': f'HAProxy service created and started on port {sock_port}',
-                            'sock_port': sock_port,
-                            'stats_port': stats_port,
-                            'gost_ports': wg_ports,
-                            'pid': pid
-                        })
-                    except (OSError, ValueError):
-                        pass
-                
-                # If we get here, service didn't start properly
-                return jsonify({
-                    'success': False,
-                    'error': 'HAProxy service failed to start properly'
-                }), 500
-            else:
-                # Clean up config file if start failed
-                try:
-                    os.remove(config_file)
-                except:
-                    pass
-                
-                error_msg = result.get('stderr', 'Unknown error')
-                if not error_msg.strip():
-                    error_msg = f"Command failed with return code {result.get('returncode', -1)}"
-                
-                return jsonify({
-                    'success': False,
-                    'error': f'Failed to start HAProxy: {error_msg}',
-                    'stdout': result.get('stdout', ''),
-                    'stderr': result.get('stderr', ''),
-                    'returncode': result.get('returncode', -1)
-                }), 500
+            # Start the command in background and return immediately
+            import subprocess
+            
+            # Start process in background
+            process = subprocess.Popen(command, shell=True, cwd=BASE_DIR, 
+                                     stdout=subprocess.DEVNULL, 
+                                     stderr=subprocess.DEVNULL)
+            
+            # Return success immediately
+            return jsonify({
+                'success': True,
+                'message': f'HAProxy service created on port {sock_port} (starting in background)',
+                'service': {
+                    'sock_port': sock_port,
+                    'stats_port': stats_port,
+                    'wg_ports': wg_ports
+                },
+                'warning': 'Service is starting in background'
+            })
                 
         except Exception as e:
             return jsonify({

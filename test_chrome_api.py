@@ -26,7 +26,7 @@ test_cases = [
     {
         "name": "Case 2: Port in use with different server - create new HAProxy",
         "data": {
-            "proxy_check": "socks5://server:7891:us10.nordvpn.com:89",
+            "proxy_check": "socks5://server:7891:us-ca112.nordvpn.com:89",
             "data": {
                 "count": 2,
                 "profiles": [
@@ -39,11 +39,11 @@ test_cases = [
     {
         "name": "Case 3: HAProxy exists but different server - reconfigure",
         "data": {
-            "proxy_check": "socks5://server:7891:de42.nordvpn.com:89",
+            "proxy_check": "socks5://server:7891:de507.nordvpn.com:89",
             "data": {
                 "count": 1,
                 "profiles": [
-                    {"id": 1, "name": "Profile 1", "proxy": "socks5://127.0.0.1:7892:us10.nordvpn.com:89"}
+                    {"id": 1, "name": "Profile 1", "proxy": "socks5://127.0.0.1:7892:us-ca112.nordvpn.com:89"}
                 ]
             }
         }
@@ -51,7 +51,7 @@ test_cases = [
     {
         "name": "Case 4: HAProxy doesn't exist - create new",
         "data": {
-            "proxy_check": "socks5://server:7893:uk42.nordvpn.com:89",
+            "proxy_check": "socks5://server:7893:uk-fr18.nordvpn.com:89",
             "data": {
                 "count": 1,
                 "profiles": [
@@ -63,7 +63,7 @@ test_cases = [
     {
         "name": "Case 5: ProtonVPN server",
         "data": {
-            "proxy_check": "socks5://server:7894:us-ca-10.protonvpn.com:4443",
+            "proxy_check": "socks5://server:7894:af-03.protonvpn.net:443",
             "data": {
                 "count": 1,
                 "profiles": [
@@ -75,12 +75,24 @@ test_cases = [
     {
         "name": "Case 6: Reuse available HAProxy (not in profiles list)",
         "data": {
-            "proxy_check": "socks5://server:7891:fr42.nordvpn.com:89",
+            "proxy_check": "socks5://server:7891:fr921.nordvpn.com:89",
             "data": {
                 "count": 2,
                 "profiles": [
-                    {"id": 1, "name": "Profile 1", "proxy": "socks5://127.0.0.1:7892:us10.nordvpn.com:89"},
-                    {"id": 2, "name": "Profile 2", "proxy": "socks5://127.0.0.1:7893:jp10.nordvpn.com:89"}
+                    {"id": 1, "name": "Profile 1", "proxy": "socks5://127.0.0.1:7892:us-ca112.nordvpn.com:89"},
+                    {"id": 2, "name": "Profile 2", "proxy": "socks5://127.0.0.1:7893:de507.nordvpn.com:89"}
+                ]
+            }
+        }
+    },
+    {
+        "name": "Case 7: Custom test with thenngua.ddns.net",
+        "data": {
+            "proxy_check": "socks5://thenngua.ddns.net:7891:us:1",
+            "data": {
+                "count": 1,
+                "profiles": [
+                    {"id": 652, "name": "P-20251020_104629", "proxy": "socks5://thenngua.ddns.net:7894"}
                 ]
             }
         }
