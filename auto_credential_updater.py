@@ -207,40 +207,43 @@ class AutoCredentialUpdater:
             print(f"❌ Error restarting gost service on port {port}: {e}")
             
     def _cleanup_unused_services(self):
-        """Dọn dẹp các service không sử dụng dựa trên profile count API"""
+        """Dọn dẹp các service không sử dụng dựa trên profile count API từ cả 2 nguồn"""
         try:
-            # Gọi API để lấy danh sách ports đang sử dụng
-            response = requests.get("http://localhost:18112/api/profiles/count-open", timeout=10)
-            if response.status_code != 200:
-                print(f"❌ Failed to get profile count: {response.status_code}")
-                return
-                
-            data = response.json()
-            
-            # API trả về array trực tiếp, không phải object
-            if not isinstance(data, list):
-                print(f"❌ Unexpected API response format: {type(data)}")
-                return
-                
-            # Lấy danh sách ports đang sử dụng
             used_ports = set()
-            for profile in data:
-                proxy = profile.get('proxy', '')
-                if proxy and ':' in proxy:
-                    # Parse proxy format: "socks5://host:PORT:server" hoặc "127.0.0.1:PORT:server"
-                    parts = proxy.split(':')
-                    if len(parts) >= 2:
-                        try:
-                            # Tìm port trong các phần của proxy string
-                            for part in parts:
-                                if part.isdigit() and 1000 <= int(part) <= 65535:
-                                    port = int(part)
-                                    used_ports.add(port)
-                                    break
-                        except ValueError:
-                            pass
             
-            print(f"🔍 Found {len(used_ports)} used ports: {sorted(used_ports)}")
+            # API 1: localhost
+            try:
+                response1 = requests.get("http://localhost:18112/api/profiles/count-open", timeout=10)
+                if response1.status_code == 200:
+                    data1 = response1.json()
+                    if isinstance(data1, list):
+                        ports1 = self._extract_ports_from_profiles(data1)
+                        used_ports.update(ports1)
+                        print(f"🔍 Localhost API: Found {len(ports1)} used ports: {sorted(ports1)}")
+                    else:
+                        print(f"❌ Localhost API unexpected format: {type(data1)}")
+                else:
+                    print(f"❌ Localhost API failed: {response1.status_code}")
+            except Exception as e:
+                print(f"❌ Error calling localhost API: {e}")
+            
+            # API 2: btm2025.ddns.net
+            try:
+                response2 = requests.get("http://btm2025.ddns.net:18112/api/profiles/count-open", timeout=10)
+                if response2.status_code == 200:
+                    data2 = response2.json()
+                    if isinstance(data2, list):
+                        ports2 = self._extract_ports_from_profiles(data2)
+                        used_ports.update(ports2)
+                        print(f"🔍 BTM2025 API: Found {len(ports2)} used ports: {sorted(ports2)}")
+                    else:
+                        print(f"❌ BTM2025 API unexpected format: {type(data2)}")
+                else:
+                    print(f"❌ BTM2025 API failed: {response2.status_code}")
+            except Exception as e:
+                print(f"❌ Error calling BTM2025 API: {e}")
+            
+            print(f"🔍 Total unique used ports: {len(used_ports)} - {sorted(used_ports)}")
             
             # Tìm và dọn dẹp các service không sử dụng
             self._cleanup_unused_gost_services(used_ports)
@@ -248,6 +251,26 @@ class AutoCredentialUpdater:
             
         except Exception as e:
             print(f"❌ Error in cleanup unused services: {e}")
+            
+    def _extract_ports_from_profiles(self, profiles):
+        """Trích xuất ports từ danh sách profiles"""
+        ports = set()
+        for profile in profiles:
+            proxy = profile.get('proxy', '')
+            if proxy and ':' in proxy:
+                # Parse proxy format: "socks5://host:PORT:server" hoặc "127.0.0.1:PORT:server"
+                parts = proxy.split(':')
+                if len(parts) >= 2:
+                    try:
+                        # Tìm port trong các phần của proxy string
+                        for part in parts:
+                            if part.isdigit() and 1000 <= int(part) <= 65535:
+                                port = int(part)
+                                ports.add(port)
+                                break
+                    except ValueError:
+                        pass
+        return ports
             
     def _cleanup_unused_gost_services(self, used_ports):
         """Dọn dẹp Gost services không sử dụng"""
@@ -459,8 +482,6 @@ class AutoCredentialUpdater:
 def signal_handler(signum, frame):
     """Xử lý signal để dừng gracefully"""
     print("\n🛑 Received signal, stopping auto updater...")
-    if 'updater' in globals():
-        updater.stop_monitoring()
     sys.exit(0)
 
 def main():
