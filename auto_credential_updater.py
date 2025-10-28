@@ -286,9 +286,12 @@ class AutoCredentialUpdater:
                         # Mapping: haproxy_port = 7891 + (gost_port - 18181)
                         haproxy_port = 7891 + (gost_port - 18181)
                         
-                        # Nếu HAProxy port này đang được sử dụng, thì không xóa Gost
-                        if haproxy_port in used_ports:
-                            print(f"🛡️  Protecting Gost {gost_port} (belongs to HAProxy {haproxy_port})")
+                        # Kiểm tra xem HAProxy tương ứng có tồn tại không
+                        haproxy_config_exists = os.path.exists(os.path.join(self.config_dir, f"haproxy_{haproxy_port}.cfg"))
+                        
+                        # Nếu HAProxy port này đang được sử dụng VÀ HAProxy config tồn tại, thì không xóa Gost
+                        if haproxy_port in used_ports and haproxy_config_exists:
+                            print(f"🛡️  Protecting Gost {gost_port} (belongs to active HAProxy {haproxy_port})")
                             continue
                             
                         # Nếu Gost port trực tiếp được sử dụng, cũng không xóa
@@ -296,7 +299,14 @@ class AutoCredentialUpdater:
                             print(f"🛡️  Protecting Gost {gost_port} (directly used)")
                             continue
                         
-                        # Kiểm tra thời gian tạo trước khi xóa
+                        # Nếu HAProxy không tồn tại, Gost bị orphaned - xóa ngay lập tức
+                        if not haproxy_config_exists:
+                            print(f"🔍 Gost {gost_port} orphaned (HAProxy {haproxy_port} config missing)")
+                            print(f"🧹 Cleaning up orphaned Gost service on port {gost_port}")
+                            self._stop_and_remove_gost_service(gost_port)
+                            continue
+                        
+                        # Kiểm tra thời gian tạo trước khi xóa (chỉ cho Gost không orphaned)
                         if not self._should_cleanup_service(gost_port, "gost"):
                             continue
                             
@@ -333,9 +343,23 @@ class AutoCredentialUpdater:
     def _stop_and_remove_gost_service(self, port):
         """Dừng và xóa Gost service"""
         try:
-            # Stop gost service
-            cmd = f"cd {self.base_dir} && ./manage_gost.sh restart-port {port}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            # Stop gost process
+            pid_file = os.path.join(self.log_dir, f"gost_{port}.pid")
+            if os.path.exists(pid_file):
+                try:
+                    with open(pid_file, 'r') as f:
+                        pid = int(f.read().strip())
+                    os.kill(pid, 15)  # SIGTERM
+                    print(f"✅ Stopped Gost process {pid} on port {port}")
+                except (OSError, ValueError, ProcessLookupError):
+                    pass
+            
+            # Kill any process on this port
+            try:
+                cmd = f"lsof -ti:{port} | xargs kill -9 2>/dev/null || true"
+                subprocess.run(cmd, shell=True, capture_output=True, timeout=5)
+            except:
+                pass
             
             # Remove config file
             config_file = os.path.join(self.config_dir, f"gost_{port}.config")
@@ -344,7 +368,6 @@ class AutoCredentialUpdater:
                 print(f"✅ Removed Gost config for port {port}")
                 
             # Remove PID file
-            pid_file = os.path.join(self.log_dir, f"gost_{port}.pid")
             if os.path.exists(pid_file):
                 os.remove(pid_file)
                 
