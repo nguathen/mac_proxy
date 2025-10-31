@@ -82,6 +82,7 @@ def _determine_smart_vpn_provider(check_server, profiles):
     2. Số lượng kết nối hiện tại
     3. Giới hạn kết nối (NordVPN: 10, ProtonVPN: unlimited)
     """
+    return 'protonvpn'
     try:
         # Đếm số lượng kết nối hiện tại cho mỗi provider
         nordvpn_connections = 0
