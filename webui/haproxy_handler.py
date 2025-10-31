@@ -16,6 +16,32 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports):
     """Đăng ký các routes HAProxy với Flask app"""
     
+    def extract_gost_ports_from_haproxy_config(haproxy_port):
+        """Extract tất cả Gost ports từ HAProxy config file"""
+        gost_ports = []
+        config_file = os.path.join(BASE_DIR, 'config', f'haproxy_{haproxy_port}.cfg')
+        
+        if not os.path.exists(config_file):
+            return gost_ports
+        
+        try:
+            with open(config_file, 'r') as f:
+                content = f.read()
+                # Tìm tất cả các dòng server gost* 127.0.0.1:PORT
+                # Pattern: server gost1 127.0.0.1:18181 check
+                matches = re.findall(r'server\s+gost\d+\s+127\.0\.0\.1:(\d+)', content)
+                for match in matches:
+                    try:
+                        gost_port = int(match)
+                        if gost_port not in gost_ports:
+                            gost_ports.append(gost_port)
+                    except ValueError:
+                        pass
+        except Exception as e:
+            print(f"⚠️  Error reading HAProxy config for port {haproxy_port}: {e}")
+        
+        return gost_ports
+    
     @app.route('/api/haproxy/list')
     def api_haproxy_list():
         """Lấy danh sách tất cả HAProxy services"""
@@ -297,6 +323,66 @@ listen proxy_{sock_port}
             
             deleted_files = []
             killed_processes = []
+            deleted_gost_ports = []
+            import subprocess
+            
+            # 0. Đọc config file để lấy danh sách Gost ports trước khi xóa
+            print(f"📖 Reading HAProxy config to find associated Gost ports...")
+            gost_ports = extract_gost_ports_from_haproxy_config(port)
+            if gost_ports:
+                print(f"✓ Found {len(gost_ports)} Gost port(s): {gost_ports}")
+            else:
+                print(f"ℹ️  No Gost ports found in HAProxy config")
+            
+            # Xóa tất cả Gost ports liên quan
+            for gost_port in gost_ports:
+                try:
+                    print(f"🗑️  Deleting Gost port {gost_port}...")
+                    
+                    # Stop Gost process
+                    gost_pid_file = os.path.join(LOG_DIR, f'gost_{gost_port}.pid')
+                    if os.path.exists(gost_pid_file):
+                        try:
+                            with open(gost_pid_file) as f:
+                                pid = int(f.read().strip())
+                            os.kill(pid, 15)  # SIGTERM
+                            killed_processes.append(f"Gost {gost_port} process (PID {pid})")
+                            print(f"✓ Stopped Gost {gost_port} (PID {pid})")
+                        except (OSError, ValueError):
+                            pass
+                    
+                    # Delete Gost files
+                    gost_files_to_remove = [
+                        (os.path.join(LOG_DIR, f'gost_{gost_port}.pid'), f'Gost {gost_port} PID file'),
+                        (os.path.join(LOG_DIR, f'gost_{gost_port}.log'), f'Gost {gost_port} log'),
+                        (os.path.join(BASE_DIR, 'config', f'gost_{gost_port}.config'), f'Gost {gost_port} config file')
+                    ]
+                    
+                    for file_path, description in gost_files_to_remove:
+                        if os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                                deleted_files.append(description)
+                                print(f"✓ Removed {description}")
+                            except Exception as e:
+                                print(f"⚠️  Error removing {description}: {e}")
+                    
+                    deleted_gost_ports.append(str(gost_port))
+                except Exception as e:
+                    print(f"⚠️  Error deleting Gost {gost_port}: {e}")
+            
+            # Force kill any remaining Gost processes for these ports
+            if gost_ports:
+                for gost_port in gost_ports:
+                    try:
+                        # Force kill any remaining gost processes for this port
+                        result = subprocess.run(['pkill', '-f', f'gost.*{gost_port}'], 
+                                              capture_output=True, text=True)
+                        if result.returncode == 0:
+                            killed_processes.append(f"Force killed Gost {gost_port} process")
+                            print(f"✓ Force killed remaining Gost {gost_port} process")
+                    except Exception as e:
+                        print(f"⚠️  Error force killing Gost {gost_port}: {e}")
             
             # 1. Dừng tất cả processes liên quan
             print(f"🛑 Stopping all processes for port {port}...")
@@ -326,7 +412,6 @@ listen proxy_{sock_port}
                     pass
             
             # Force kill any remaining processes
-            import subprocess
             try:
                 # Kill any setup_haproxy.sh processes for this port
                 result = subprocess.run(['pkill', '-f', f'setup_haproxy.sh.*--sock-port {port}'], 
@@ -399,11 +484,17 @@ listen proxy_{sock_port}
             except Exception as e:
                 print(f"⚠️  Error auto-unlocking: {e}")
             
+            message = f'HAProxy service on port {port} deleted successfully'
+            if deleted_gost_ports:
+                message += f' (also deleted {len(deleted_gost_ports)} Gost port(s): {", ".join(deleted_gost_ports)})'
+            message += ' and unlocked for recreation'
+            
             return jsonify({
                 'success': True,
-                'message': f'HAProxy service on port {port} deleted successfully and unlocked for recreation',
+                'message': message,
                 'deleted_files': deleted_files,
-                'killed_processes': killed_processes
+                'killed_processes': killed_processes,
+                'deleted_gost_ports': deleted_gost_ports
             })
             
         except Exception as e:
