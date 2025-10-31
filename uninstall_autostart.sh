@@ -11,9 +11,10 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🗑️  Gỡ cài đặt Auto Start"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Unload service
+# Unload service (dùng bootout cho macOS mới)
 if launchctl list | grep -q "$PLIST_NAME"; then
     echo "🛑 Dừng service..."
+    launchctl bootout "gui/$(id -u)/$PLIST_NAME" 2>/dev/null || \
     launchctl unload "$PLIST_DEST" 2>/dev/null || true
 fi
 
