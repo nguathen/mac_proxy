@@ -326,6 +326,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
             check_server = proxy_parts[2] if len(proxy_parts) >= 3 else ''
             check_proxy_port = proxy_parts[3] if len(proxy_parts) >= 4 else ''
             
+            # Validate check_port is a valid integer
+            if not check_port or not check_port.isdigit():
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid port in proxy_check: {check_port}'
+                }), 400
+            
             # Parse proxy_check để map với 3 trường hợp apply
             apply_data = {}
             
@@ -352,18 +359,25 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
             for profile in profiles:
                 if profile.get('proxy'):
                     proxy_str = profile['proxy']
+                    # Skip invalid proxy strings (empty or just colon)
+                    if not proxy_str or proxy_str.strip() == ':':
+                        continue
+                    
                     # Parse socks5://host:port:server:proxy_port format
                     if proxy_str.startswith('socks5://'):
                         proxy_str = proxy_str[9:]
                     
                     parts = proxy_str.split(':')
                     if len(parts) >= 2:
-                        existing_proxies.append({
-                            'host': parts[0],
-                            'port': parts[1],
-                            'server': parts[2] if len(parts) >= 3 else '',
-                            'proxy_port': parts[3] if len(parts) >= 4 else ''
-                        })
+                        # Validate port is a valid integer before adding
+                        port = parts[1].strip()
+                        if port and port.isdigit():
+                            existing_proxies.append({
+                                'host': parts[0],
+                                'port': port,
+                                'server': parts[2] if len(parts) >= 3 else '',
+                                'proxy_port': parts[3] if len(parts) >= 4 else ''
+                            })
             
             # So sánh proxy_check với các proxy của profiles
             exact_match = None
@@ -452,7 +466,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     return f'socks5://{client_host}:{haproxy_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có HAProxy rảnh, kiểm tra orphaned Gost hoặc tạo mới
-                used_ports = [int(p['port']) for p in existing_proxies]
+                used_ports = []
+                for p in existing_proxies:
+                    try:
+                        port = int(p['port'])
+                        used_ports.append(port)
+                    except (ValueError, KeyError):
+                        continue  # Skip invalid ports
                 
                 # Kiểm tra xem có orphaned Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
@@ -579,7 +599,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     return f'socks5://{client_host}:{haproxy_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có HAProxy rảnh, kiểm tra orphaned Gost hoặc tạo mới
-                used_ports = [int(p['port']) for p in existing_proxies]
+                used_ports = []
+                for p in existing_proxies:
+                    try:
+                        port = int(p['port'])
+                        used_ports.append(port)
+                    except (ValueError, KeyError):
+                        continue  # Skip invalid ports
                 
                 # Kiểm tra xem có orphaned Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
