@@ -145,6 +145,16 @@ def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_h
             config_dir = os.path.join(BASE_DIR, 'config')
             config_file = os.path.join(config_dir, f'haproxy_{sock_port}.cfg')
             pid_file = os.path.join(LOG_DIR, f'haproxy_{sock_port}.pid')
+            lock_file = os.path.join(LOG_DIR, f'deleted_port_{sock_port}.lock')
+            
+            # Check and remove lock file if exists (allow recreation)
+            if os.path.exists(lock_file):
+                try:
+                    os.remove(lock_file)
+                    print(f"✓ Removed lock file for port {sock_port} to allow recreation")
+                except Exception as e:
+                    print(f"⚠️  Warning: Could not remove lock file: {e}")
+                    # Continue anyway, lock file shouldn't block creation if config doesn't exist
             
             # Check config file
             if os.path.exists(config_file):
@@ -173,10 +183,69 @@ def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_h
             # Create config directory if not exists
             os.makedirs(config_dir, exist_ok=True)
             
+            # Validate and convert wg_ports to integers
+            if not wg_ports:
+                # Default to port based on sock_port: 7891 -> 18181, 7892 -> 18182, etc.
+                wg_ports = [sock_port - 6000]  # 7891 - 6000 = 18181
+                print(f"ℹ️  No Gost ports provided, using default: {wg_ports}")
+            else:
+                # Convert to integers
+                try:
+                    wg_ports = [int(p) for p in wg_ports]
+                except (ValueError, TypeError):
+                    return jsonify({
+                        'success': False,
+                        'error': 'Invalid Gost port numbers in wg_ports'
+                    }), 400
+                
+                # Validate Gost ports are in valid range
+                for port in wg_ports:
+                    if port < 18181 or port > 18999:
+                        return jsonify({
+                            'success': False,
+                            'error': f'Invalid Gost port {port}. Must be between 18181-18999'
+                        }), 400
+            
+            # Check if any Gost ports are already in use by other HAProxy instances
+            for gost_port in wg_ports:
+                # Check if this Gost port is used by another HAProxy
+                config_files = os.listdir(config_dir) if os.path.exists(config_dir) else []
+                for cfg_file in config_files:
+                    if cfg_file.startswith('haproxy_') and cfg_file.endswith('.cfg') and cfg_file != f'haproxy_{sock_port}.cfg':
+                        try:
+                            cfg_path = os.path.join(config_dir, cfg_file)
+                            with open(cfg_path, 'r') as f:
+                                content = f.read()
+                                if f'127.0.0.1:{gost_port}' in content:
+                                    other_port = cfg_file.replace('haproxy_', '').replace('.cfg', '')
+                                    return jsonify({
+                                        'success': False,
+                                        'error': f'Gost port {gost_port} is already used by HAProxy {other_port}. Please choose a different port.'
+                                    }), 400
+                        except Exception:
+                            pass
+            
             # Auto-create Gost config files for ports that don't exist
             if wg_ports:
                 for port in wg_ports:
                     gost_config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+                    gost_pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
+                    
+                    # Clean up orphaned PID files (process not running)
+                    if os.path.exists(gost_pid_file):
+                        try:
+                            with open(gost_pid_file) as f:
+                                pid = int(f.read().strip())
+                            os.kill(pid, 0)  # Check if process exists
+                            # Process is running, keep it
+                        except (OSError, ValueError):
+                            # PID file exists but process not running, clean up
+                            try:
+                                os.remove(gost_pid_file)
+                                print(f"✓ Cleaned up orphaned Gost PID file for port {port}")
+                            except:
+                                pass
+                    
                     if not os.path.exists(gost_config_file):
                         # Create default Gost config with ProtonVPN
                         # Get random ProtonVPN server
