@@ -548,8 +548,13 @@ def api_clear_all():
             except Exception as e:
                 print(f"⚠️  Error stopping Gost {port}: {e}")
         
-        # 2. Stop all HAProxy services
+        # 2. Stop all HAProxy services (bỏ qua port 7890 - protected port)
+        PROTECTED_PORTS = {7890}
         for port in haproxy_ports:
+            # Bỏ qua port được bảo vệ
+            if port in PROTECTED_PORTS:
+                print(f"🛡️  Skipping protected HAProxy instance {port}")
+                continue
             try:
                 # Stop HAProxy process
                 pid_file = os.path.join(LOG_DIR, f'haproxy_{port}.pid')

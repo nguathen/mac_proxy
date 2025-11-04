@@ -48,12 +48,18 @@ for pid_file in logs/health_*.pid; do
     fi
 done
 
-# Dừng HAProxy processes
+# Dừng HAProxy processes (bỏ qua port 7890 - protected port)
 echo ""
 echo "🛑 Stopping HAProxy processes..."
+PROTECTED_PORTS="7890"
 for pid_file in logs/haproxy_*.pid; do
     if [ -f "$pid_file" ]; then
         port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+        # Bỏ qua port được bảo vệ
+        if [[ "$PROTECTED_PORTS" == *"$port"* ]]; then
+            echo "🛡️  Skipping protected HAProxy instance $port"
+            continue
+        fi
         pid=$(cat "$pid_file")
         kill "$pid" 2>/dev/null && echo "✓ Stopped HAProxy instance $port (PID $pid)" || true
         rm -f "$pid_file"

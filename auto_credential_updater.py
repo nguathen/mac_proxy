@@ -322,12 +322,21 @@ class AutoCredentialUpdater:
     def _cleanup_unused_haproxy_services(self, used_ports):
         """Dọn dẹp HAProxy services không sử dụng"""
         try:
+            # Protected ports - không bao giờ bị cleanup (port 7890 là Cloudflare WARP service)
+            protected_ports = {7890}
+            
             # Tìm tất cả HAProxy config files
             for filename in os.listdir(self.config_dir):
                 if filename.startswith("haproxy_") and filename.endswith(".cfg"):
                     port_str = filename[8:-4]  # Remove "haproxy_" and ".cfg"
                     try:
                         port = int(port_str)
+                        
+                        # Bảo vệ port 7890 và các port được bảo vệ
+                        if port in protected_ports:
+                            print(f"🛡️  Protecting HAProxy service on port {port} (protected port)")
+                            continue
+                        
                         if port not in used_ports:
                             # Kiểm tra thời gian tạo trước khi xóa
                             if not self._should_cleanup_service(port, "haproxy"):
@@ -384,6 +393,12 @@ class AutoCredentialUpdater:
     def _stop_and_remove_haproxy_service(self, port):
         """Dừng và xóa HAProxy service"""
         try:
+            # Protected ports - không bao giờ bị dừng (port 7890 là Cloudflare WARP service)
+            protected_ports = {7890}
+            if port in protected_ports:
+                print(f"🛡️  Cannot stop protected HAProxy service on port {port}")
+                return
+            
             # Stop HAProxy process
             pid_file = os.path.join(self.log_dir, f"haproxy_{port}.pid")
             if os.path.exists(pid_file):
