@@ -21,17 +21,38 @@ if ! command -v haproxy &> /dev/null && [ ! -f "/opt/homebrew/sbin/haproxy" ]; t
     exit 1
 fi
 
-# Kiểm tra Cloudflare WARP
+# Kiểm tra và auto-reconnect Cloudflare WARP
 echo "🔍 Kiểm tra Cloudflare WARP..."
-if ! nc -z 127.0.0.1 8111 2>/dev/null; then
-    echo "⚠️  Cloudflare WARP proxy (port 8111) không hoạt động"
-    echo "   Vui lòng cấu hình WARP:"
-    echo "   warp-cli set-mode proxy"
-    echo "   warp-cli set-proxy-port 8111"
-    echo "   warp-cli connect"
-    exit 1
+warp_ok=false
+
+# Kiểm tra WARP status và proxy functionality
+if command -v warp-cli &> /dev/null; then
+    if warp-cli status 2>/dev/null | grep -qi "connected" && \
+       nc -z 127.0.0.1 8111 2>/dev/null && \
+       curl -s --connect-timeout 3 --max-time 5 -x "socks5h://127.0.0.1:8111" https://api.ipify.org >/dev/null 2>&1; then
+        echo "✅ Cloudflare WARP proxy đang hoạt động (port 8111)"
+        warp_ok=true
+    else
+        echo "⚠️  Cloudflare WARP không hoạt động, đang thử reconnect..."
+        warp-cli disconnect 2>/dev/null || true
+        sleep 2
+        warp-cli connect 2>/dev/null || true
+        sleep 3
+        
+        # Kiểm tra lại sau khi reconnect
+        if warp-cli status 2>/dev/null | grep -qi "connected" && \
+           nc -z 127.0.0.1 8111 2>/dev/null && \
+           curl -s --connect-timeout 3 --max-time 5 -x "socks5h://127.0.0.1:8111" https://api.ipify.org >/dev/null 2>&1; then
+            echo "✅ Cloudflare WARP đã được reconnect thành công"
+            warp_ok=true
+        else
+            echo "⚠️  Không thể reconnect WARP, nhưng vẫn tiếp tục..."
+            echo "   Proxy có thể không hoạt động cho đến khi WARP được fix"
+        fi
+    fi
 else
-    echo "✅ Cloudflare WARP proxy đang chạy (port 8111)"
+    echo "⚠️  warp-cli không tìm thấy, bỏ qua kiểm tra WARP"
+    warp_ok=true  # Cho phép tiếp tục nếu không có warp-cli
 fi
 
 # Kiểm tra nếu đã chạy
@@ -64,6 +85,14 @@ sleep 1
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     pid=$(cat "$PID_FILE")
     echo "✅ HAProxy 7890 đã khởi động thành công (PID: $pid)"
+    
+    # Khởi động WARP monitor
+    echo ""
+    echo "🛡️  Khởi động WARP monitor..."
+    if [ -f "./warp_monitor.sh" ]; then
+        ./warp_monitor.sh start 2>/dev/null || true
+    fi
+    
     echo ""
     echo "📊 Thông tin proxy:"
     echo "   • SOCKS5: socks5://0.0.0.0:7890"

@@ -49,6 +49,12 @@ fi
 # Xóa PID file
 rm -f "$PID_FILE"
 
+# Dừng WARP monitor
+if [ -f "./warp_monitor.sh" ]; then
+    echo "🛑 Dừng WARP monitor..."
+    ./warp_monitor.sh stop 2>/dev/null || true
+fi
+
 # Kiểm tra lại
 if kill -0 "$pid" 2>/dev/null; then
     echo "❌ Không thể dừng HAProxy 7890"
