@@ -27,6 +27,15 @@ echo ""
 #    ./stop_webui.sh
 #fi
 
+# Dừng WARP Monitor
+echo ""
+echo "🛑 Stopping WARP Monitor..."
+if [ -f "services/haproxy_7890/warp_monitor.sh" ]; then
+    cd services/haproxy_7890
+    ./warp_monitor.sh stop 2>/dev/null || true
+    cd ../..
+fi
+
 # Dừng Gost
 echo ""
 echo "🛑 Stopping gost instances..."

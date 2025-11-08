@@ -112,6 +112,19 @@ echo "🌐 Starting Web UI..."
 chmod +x start_webui_daemon.sh
 ./start_webui_daemon.sh
 
+# Khởi động WARP monitor cho HAProxy 7890
+echo ""
+echo "🛡️  Starting WARP Monitor..."
+if [ -f "services/haproxy_7890/warp_monitor.sh" ]; then
+    cd services/haproxy_7890
+    chmod +x warp_monitor.sh
+    ./warp_monitor.sh start 2>/dev/null || true
+    cd ../..
+    echo "✅ WARP Monitor started"
+else
+    echo "⚠️  WARP Monitor script not found"
+fi
+
 # Hiển thị trạng thái
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -153,6 +166,11 @@ echo "🔄 Auto Credential Updater:"
 echo "   • Tự động cập nhật credentials mỗi 30 giây"
 echo "   • Tự động dọn dẹp services không sử dụng mỗi 5 phút"
 echo "   • Log: logs/auto_updater.log"
+echo ""
+echo "🛡️  WARP Monitor:"
+echo "   • Tự động kiểm tra và reconnect WARP nếu cần"
+echo "   • Check interval: 30 giây"
+echo "   • Log: services/haproxy_7890/logs/warp_monitor.log"
 echo ""
 echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"
