@@ -129,8 +129,8 @@ def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, 
                     except Exception:
                         pass
             
-            # Start gost service
-            result = run_command(f'bash manage_gost.sh start-port {port}', timeout=90)
+            # Start gost service (use restart-port as it handles both start and restart)
+            result = run_command(f'bash manage_gost.sh restart-port {port}', timeout=90)
             
             if result['success']:
                 return jsonify({

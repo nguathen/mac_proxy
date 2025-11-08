@@ -276,13 +276,13 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
             else:
                 return jsonify({'success': False, 'error': 'Invalid parameters. Provide either country_code, or proxy_host+proxy_port, or leave all empty for random'}), 400
             
-            # Validate port - check if it's a valid gost port (18181-18999 range)
+            # Validate port - check if it's a valid gost port (7891-7999 range)
             try:
                 port_num = int(port)
-                if port_num < 18181 or port_num > 18999:
+                if port_num < 7891 or port_num > 7999:
                     return jsonify({
                         'success': False, 
-                        'error': f'Invalid port. Port must be between 18181-18999'
+                        'error': f'Invalid port. Port must be between 7891-7999'
                     }), 400
             except ValueError:
                 return jsonify({

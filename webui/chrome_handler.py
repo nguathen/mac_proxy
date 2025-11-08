@@ -158,8 +158,8 @@ def _is_port_available(port, used_ports, BASE_DIR):
     if port in used_ports:
         return False
     
-    # Kiểm tra config file có tồn tại không
-    config_file = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
+    # Kiểm tra Gost config file có tồn tại không
+    config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
     if os.path.exists(config_file):
         return False
     
@@ -173,7 +173,7 @@ def _find_available_port(start_port, used_ports, BASE_DIR, max_port=7999):
     return None
 
 def _find_orphaned_gost_for_port(requested_port):
-    """Tìm orphaned Gost (Gost đang chạy nhưng không có HAProxy tương ứng) phù hợp với port yêu cầu"""
+    """Tìm Gost đang chạy với port yêu cầu (không còn HAProxy nữa)"""
     try:
         # Lấy danh sách services
         status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
@@ -181,45 +181,31 @@ def _find_orphaned_gost_for_port(requested_port):
             return None
         
         status_data = status_response.json()
-        haproxy_services = status_data.get('haproxy', [])
         gost_services = status_data.get('gost', [])
         
-        # Tính Gost port tương ứng với HAProxy port yêu cầu
-        expected_gost_port = 18181 + (requested_port - 7891)
-        
-        # Tìm Gost đang chạy với port tương ứng
+        # Tìm Gost đang chạy với port yêu cầu (Gost giờ chạy trực tiếp trên 789x)
         for gost in gost_services:
-            if gost.get('running') and int(gost['port']) == expected_gost_port:
-                # Kiểm tra xem có HAProxy tương ứng không
-                haproxy_exists = False
-                for haproxy in haproxy_services:
-                    if int(haproxy.get('port')) == requested_port:
-                        haproxy_exists = True
-                        break
-                
-                # Nếu không có HAProxy tương ứng, đây là orphaned Gost
-                if not haproxy_exists:
-                    return {
-                        'port': requested_port,
-                        'gost_port': expected_gost_port,
-                        'orphaned': True
-                    }
+            if gost.get('running') and int(gost['port']) == requested_port:
+                return {
+                    'port': requested_port,
+                    'gost_port': requested_port,
+                    'orphaned': False
+                }
         
         return None
     except Exception as e:
-        print(f"Error finding orphaned Gost: {e}")
+        print(f"Error finding Gost: {e}")
         return None
 
-def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port):
-    """Tìm HAProxy và Gost đang rảnh (không được sử dụng bởi profiles) hoặc có cùng server và port"""
+def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port):
+    """Tìm Gost đang rảnh (không được sử dụng bởi profiles) hoặc có cùng server và port"""
     try:
-        # Lấy danh sách HAProxy đang chạy
+        # Lấy danh sách Gost đang chạy
         status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
         if status_response.status_code != 200:
             return None
         
         status_data = status_response.json()
-        haproxy_services = status_data.get('haproxy', [])
         gost_services = status_data.get('gost', [])
         
         # Lấy danh sách ports đang được sử dụng bởi profiles
@@ -241,20 +227,6 @@ def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check
         for gost in gost_services:
             if gost.get('running'):
                 gost_port = int(gost['port'])
-                haproxy_port = 7891 + (gost_port - 18181)
-                
-                # QUAN TRỌNG: Kiểm tra xem HAProxy tương ứng có tồn tại và đang chạy không
-                haproxy_exists = False
-                haproxy_running = False
-                for haproxy in haproxy_services:
-                    if haproxy.get('port') == str(haproxy_port):
-                        haproxy_exists = True
-                        haproxy_running = haproxy.get('running', False)
-                        break
-                
-                # Chỉ xử lý nếu HAProxy tồn tại và đang chạy
-                if not haproxy_exists or not haproxy_running:
-                    continue  # Bỏ qua orphaned Gost (Gost không có HAProxy tương ứng)
                 
                 # Kiểm tra server info từ gost
                 server_info = gost.get('server_info', '')
@@ -263,39 +235,32 @@ def _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check
                     # Nếu cùng server và proxy port, tái sử dụng
                     if (gost_server == check_server and 
                         gost_proxy_port == check_proxy_port and 
-                        haproxy_port not in used_ports):
+                        gost_port not in used_ports):
                         return {
-                            'port': haproxy_port,
+                            'port': gost_port,
                             'gost_port': gost_port,
                             'server': check_server,
                             'vpn_provider': vpn_provider,
                             'same_server': True
                         }
         
-        # Nếu không tìm thấy cùng server/port, tìm HAProxy rảnh
-        for haproxy in haproxy_services:
-            if haproxy.get('running'):
-                haproxy_port = int(haproxy.get('port'))
+        # Nếu không tìm thấy cùng server/port, tìm Gost rảnh
+        for gost in gost_services:
+            if gost.get('running'):
+                gost_port = int(gost['port'])
                 
-                # Kiểm tra xem HAProxy port này có đang được sử dụng bởi profiles không
-                if haproxy_port not in used_ports:
-                    # Tìm Gost backend tương ứng
-                    gost_backend = haproxy.get('gost_backend')
-                    if gost_backend:
-                        gost_port = int(gost_backend)
-                        # Kiểm tra Gost có đang chạy không
-                        for gost in gost_services:
-                            if int(gost['port']) == gost_port and gost.get('running'):
-                                return {
-                                    'port': haproxy_port,
-                                    'gost_port': gost_port,
-                                    'server': check_server,
-                                    'vpn_provider': vpn_provider
-                                }
+                # Kiểm tra xem Gost port này có đang được sử dụng bởi profiles không
+                if gost_port not in used_ports:
+                    return {
+                        'port': gost_port,
+                        'gost_port': gost_port,
+                        'server': check_server,
+                        'vpn_provider': vpn_provider
+                    }
         
         return None
     except Exception as e:
-        print(f"Error finding available HAProxy: {e}")
+        print(f"Error finding available Gost: {e}")
         return None
 
 def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port):
@@ -444,14 +409,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 return f'socks5://{different_gost_port_same_server["host"]}:{different_gost_port_same_server["port"]}:{different_gost_port_same_server["server"]}:{different_gost_port_same_server["proxy_port"]}'
             
             elif same_gost_port_different_server:
-                # 3. Trùng port gost, proxy_host và proxy_port khác nhau thì tạo mới HA và apply gost
+                # 3. Trùng port gost, proxy_host và proxy_port khác nhau thì tạo mới Gost
                 logging.info(f"[CHROME_PROXY_CHECK] Case 3: Same port, different server")
-                # Trước tiên kiểm tra HAProxy và Gost đang rảnh
-                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port)
-                if available_haproxy:
-                    # Sử dụng lại HAProxy đang rảnh
-                    haproxy_port = available_haproxy['port']
-                    gost_port = available_haproxy['gost_port']
+                # Trước tiên kiểm tra Gost đang rảnh
+                available_gost = _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
+                if available_gost:
+                    # Sử dụng lại Gost đang rảnh
+                    gost_port = available_gost['port']
                     
                     # Apply Gost với dữ liệu đã phân tích
                     apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
@@ -483,9 +447,9 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                         actual_proxy_host = check_server if check_server else 'random-server'
                         actual_proxy_port = '89'
                     
-                    return f'socks5://{client_host}:{haproxy_port}:{actual_proxy_host}:{actual_proxy_port}'
+                    return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
-                # Nếu không có HAProxy rảnh, kiểm tra orphaned Gost hoặc tạo mới
+                # Nếu không có Gost rảnh, kiểm tra orphaned Gost hoặc tạo mới
                 used_ports = []
                 for p in existing_proxies:
                     try:
@@ -494,13 +458,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     except (ValueError, KeyError):
                         continue  # Skip invalid ports
                 
-                # Kiểm tra xem có orphaned Gost phù hợp với port yêu cầu không
+                # Kiểm tra xem có Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
                 orphaned_gost = _find_orphaned_gost_for_port(requested_port)
                 
                 if orphaned_gost and _is_port_available(orphaned_gost['port'], used_ports, BASE_DIR):
-                    # Sử dụng orphaned Gost và tạo HAProxy mới cho nó
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Found orphaned Gost {orphaned_gost['gost_port']}, creating HAProxy {orphaned_gost['port']} for it")
+                    # Sử dụng Gost đang chạy
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Found Gost {orphaned_gost['gost_port']} on port {orphaned_gost['port']}")
                     new_port = orphaned_gost['port']
                     gost_port = orphaned_gost['gost_port']
                 else:
@@ -510,11 +474,11 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     if new_port is None:
                         return jsonify({
                             'success': False,
-                            'error': 'No available HAProxy ports found'
+                            'error': 'No available Gost ports found'
                         }), 500
                     
-                    # Tính Gost port tương ứng
-                    gost_port = 18181 + (new_port - 7891)
+                    # Gost port = new_port (chạy trực tiếp trên 789x)
+                    gost_port = new_port
                 
                 # Apply Gost với dữ liệu đã phân tích trước
                 apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
@@ -546,108 +510,95 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     actual_proxy_host = check_server if check_server else 'random-server'
                     actual_proxy_port = '89'
                 
-                # Tạo HAProxy với Gost backend, tự động retry với port tiếp theo nếu port đã tồn tại
-                stats_port = new_port + 200
-                haproxy_data = {
-                    'sock_port': new_port,
-                    'stats_port': stats_port,
-                    'wg_ports': [gost_port],
-                    'host_proxy': '127.0.0.1:8111',
-                    'stats_auth': 'admin:admin123',
-                    'health_interval': 10
-                }
-                
-                # Retry với port tiếp theo nếu port đã tồn tại
+                # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10
                 retry_count = 0
-                haproxy_created = False
+                gost_created = False
                 
                 while retry_count < max_retries:
-                    haproxy_response = requests.post('http://127.0.0.1:5000/api/haproxy/create', json=haproxy_data, timeout=20)
-                    if haproxy_response.status_code == 200:
-                        haproxy_created = True
-                        break
+                    # Apply Gost với port mới
+                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    if apply_response is None:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Failed to apply server to both providers'
+                        }), 500
                     
-                    # Kiểm tra xem có phải lỗi "already exists" không
-                    try:
-                        error_data = haproxy_response.json()
-                        error_msg = error_data.get('error', '')
-                        if 'already exists' in error_msg.lower():
-                            # Tìm port tiếp theo
-                            retry_count += 1
-                            old_port = haproxy_data['sock_port']
-                            new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                            if new_port is None:
-                                return jsonify({
-                                    'success': False,
-                                    'error': 'No available HAProxy ports found after retries'
-                                }), 500
-                            
-                            # Cập nhật port và gost_port
-                            gost_port = 18181 + (new_port - 7891)
-                            stats_port = new_port + 200
-                            haproxy_data['sock_port'] = new_port
-                            haproxy_data['stats_port'] = stats_port
-                            haproxy_data['wg_ports'] = [gost_port]
-                            
-                            # Apply lại Gost với port mới
-                            apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                            if apply_response is None:
-                                return jsonify({
-                                    'success': False,
-                                    'error': 'Failed to apply server to both providers after port change'
-                                }), 500
-                            
-                            # Parse lại response để lấy thông tin server thực tế
-                            apply_result = apply_response.json()
-                            if apply_result.get('success'):
-                                actual_server = apply_result.get('server', {})
-                                actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                                proxy_url = apply_result.get('proxy_url', '')
-                                if proxy_url and ':' in proxy_url:
-                                    try:
-                                        port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                        actual_proxy_port = port_part
-                                    except:
-                                        actual_proxy_port = '89'
-                                else:
-                                    actual_proxy_port = '89'
-                            else:
-                                actual_proxy_host = check_server if check_server else 'random-server'
+                    # Parse response để lấy thông tin server thực tế
+                    apply_result = apply_response.json()
+                    if apply_result.get('success'):
+                        actual_server = apply_result.get('server', {})
+                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
+                        proxy_url = apply_result.get('proxy_url', '')
+                        if proxy_url and ':' in proxy_url:
+                            try:
+                                port_part = proxy_url.split('@')[-1].split(':')[-1]
+                                actual_proxy_port = port_part
+                            except:
                                 actual_proxy_port = '89'
-                            
-                            logging.info(f"[CHROME_PROXY_CHECK] Case 3: Port {old_port} already exists, retrying with port {new_port}")
-                            continue
                         else:
-                            # Lỗi khác, không retry
+                            actual_proxy_port = '89'
+                    else:
+                        actual_proxy_host = check_server if check_server else 'random-server'
+                        actual_proxy_port = '89'
+                    
+                    # Kiểm tra xem Gost đã được tạo và chạy chưa
+                    try:
+                        # Start Gost service
+                        import subprocess
+                        result = subprocess.run(
+                            f'bash manage_gost.sh restart-port {gost_port}',
+                            shell=True,
+                            cwd=BASE_DIR,
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        if result.returncode == 0:
+                            gost_created = True
                             break
-                    except:
-                        # Không parse được JSON, không retry
+                        else:
+                            # Kiểm tra xem có phải lỗi port đã được sử dụng không
+                            if 'already' in result.stderr.lower() or 'in use' in result.stderr.lower():
+                                retry_count += 1
+                                old_port = gost_port
+                                new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
+                                if new_port is None:
+                                    return jsonify({
+                                        'success': False,
+                                        'error': 'No available Gost ports found after retries'
+                                    }), 500
+                                gost_port = new_port
+                                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Port {old_port} already exists, retrying with port {new_port}")
+                                continue
+                            else:
+                                break
+                    except Exception as e:
+                        logging.error(f"[CHROME_PROXY_CHECK] Error starting Gost: {e}")
                         break
                 
-                if not haproxy_created:
+                if not gost_created:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to create HAProxy: {haproxy_response.text}'
+                        'error': f'Failed to create Gost on port {gost_port}'
                     }), 500
                 
-                return f'socks5://{client_host}:{new_port}:{actual_proxy_host}:{actual_proxy_port}'
+                return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
             else:
-                # 4. Port gost, proxy_host và proxy_port khác nhau, tạo mới HA và apply gost
+                # 4. Port gost, proxy_host và proxy_port khác nhau, tạo mới Gost
                 logging.info(f"[CHROME_PROXY_CHECK] Case 4: Different port and server")
-                # Trước tiên kiểm tra HAProxy và Gost đang rảnh
-                available_haproxy = _find_available_haproxy_and_gost(profiles, check_server, vpn_provider, check_proxy_port)
-                if available_haproxy:
-                    # Sử dụng lại HAProxy đang rảnh
-                    haproxy_port = available_haproxy['port']
-                    gost_port = available_haproxy['gost_port']
+                # Trước tiên kiểm tra Gost đang rảnh
+                available_gost = _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
+                if available_gost:
+                    # Sử dụng lại Gost đang rảnh
+                    gost_port = available_gost['port']
                     
                     # Kiểm tra xem có phải cùng server không
-                    if available_haproxy.get('same_server'):
+                    if available_gost.get('same_server'):
                         # Cùng server, tái sử dụng trực tiếp
-                        logging.info(f"[CHROME_PROXY_CHECK] Reusing HAProxy {haproxy_port} with same server {check_server}")
-                        return f'socks5://{client_host}:{haproxy_port}:{check_server}:{check_proxy_port}'
+                        logging.info(f"[CHROME_PROXY_CHECK] Reusing Gost {gost_port} with same server {check_server}")
+                        return f'socks5://{client_host}:{gost_port}:{check_server}:{check_proxy_port}'
                     
                     # Khác server, apply Gost với dữ liệu đã phân tích
                     apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
@@ -679,9 +630,9 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                         actual_proxy_host = check_server if check_server else 'random-server'
                         actual_proxy_port = '89'
                     
-                    return f'socks5://{client_host}:{haproxy_port}:{actual_proxy_host}:{actual_proxy_port}'
+                    return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
-                # Nếu không có HAProxy rảnh, kiểm tra orphaned Gost hoặc tạo mới
+                # Nếu không có Gost rảnh, kiểm tra Gost đang chạy hoặc tạo mới
                 used_ports = []
                 for p in existing_proxies:
                     try:
@@ -690,13 +641,13 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     except (ValueError, KeyError):
                         continue  # Skip invalid ports
                 
-                # Kiểm tra xem có orphaned Gost phù hợp với port yêu cầu không
+                # Kiểm tra xem có Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
                 orphaned_gost = _find_orphaned_gost_for_port(requested_port)
                 
                 if orphaned_gost and _is_port_available(orphaned_gost['port'], used_ports, BASE_DIR):
-                    # Sử dụng orphaned Gost và tạo HAProxy mới cho nó
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Found orphaned Gost {orphaned_gost['gost_port']}, creating HAProxy {orphaned_gost['port']} for it")
+                    # Sử dụng Gost đang chạy
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Found Gost {orphaned_gost['gost_port']} on port {orphaned_gost['port']}")
                     new_port = orphaned_gost['port']
                     gost_port = orphaned_gost['gost_port']
                 else:
@@ -706,11 +657,11 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     if new_port is None:
                         return jsonify({
                             'success': False,
-                            'error': 'No available HAProxy ports found'
+                            'error': 'No available Gost ports found'
                         }), 500
                     
-                    # Tính Gost port tương ứng
-                    gost_port = 18181 + (new_port - 7891)
+                    # Gost port = new_port (chạy trực tiếp trên 789x)
+                    gost_port = new_port
                 
                 # Apply Gost với dữ liệu đã phân tích trước
                 apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
@@ -742,92 +693,80 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     actual_proxy_host = check_server if check_server else 'random-server'
                     actual_proxy_port = '89'
                 
-                # Tạo HAProxy với Gost backend, tự động retry với port tiếp theo nếu port đã tồn tại
-                stats_port = new_port + 200
-                haproxy_data = {
-                    'sock_port': new_port,
-                    'stats_port': stats_port,
-                    'wg_ports': [gost_port],
-                    'host_proxy': '127.0.0.1:8111',
-                    'stats_auth': 'admin:admin123',
-                    'health_interval': 10
-                }
-                
-                # Retry với port tiếp theo nếu port đã tồn tại
+                # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10
                 retry_count = 0
-                haproxy_created = False
+                gost_created = False
                 
                 while retry_count < max_retries:
-                    haproxy_response = requests.post('http://127.0.0.1:5000/api/haproxy/create', json=haproxy_data, timeout=20)
-                    if haproxy_response.status_code == 200:
-                        haproxy_created = True
-                        break
+                    # Apply Gost với port mới
+                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    if apply_response is None:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Failed to apply server to both providers'
+                        }), 500
                     
-                    # Kiểm tra xem có phải lỗi "already exists" không
-                    try:
-                        error_data = haproxy_response.json()
-                        error_msg = error_data.get('error', '')
-                        if 'already exists' in error_msg.lower():
-                            # Tìm port tiếp theo
-                            retry_count += 1
-                            old_port = haproxy_data['sock_port']
-                            new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                            if new_port is None:
-                                return jsonify({
-                                    'success': False,
-                                    'error': 'No available HAProxy ports found after retries'
-                                }), 500
-                            
-                            # Cập nhật port và gost_port
-                            gost_port = 18181 + (new_port - 7891)
-                            stats_port = new_port + 200
-                            haproxy_data['sock_port'] = new_port
-                            haproxy_data['stats_port'] = stats_port
-                            haproxy_data['wg_ports'] = [gost_port]
-                            
-                            # Apply lại Gost với port mới
-                            apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                            if apply_response is None:
-                                return jsonify({
-                                    'success': False,
-                                    'error': 'Failed to apply server to both providers after port change'
-                                }), 500
-                            
-                            # Parse lại response để lấy thông tin server thực tế
-                            apply_result = apply_response.json()
-                            if apply_result.get('success'):
-                                actual_server = apply_result.get('server', {})
-                                actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                                proxy_url = apply_result.get('proxy_url', '')
-                                if proxy_url and ':' in proxy_url:
-                                    try:
-                                        port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                        actual_proxy_port = port_part
-                                    except:
-                                        actual_proxy_port = '89'
-                                else:
-                                    actual_proxy_port = '89'
-                            else:
-                                actual_proxy_host = check_server if check_server else 'random-server'
+                    # Parse response để lấy thông tin server thực tế
+                    apply_result = apply_response.json()
+                    if apply_result.get('success'):
+                        actual_server = apply_result.get('server', {})
+                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
+                        proxy_url = apply_result.get('proxy_url', '')
+                        if proxy_url and ':' in proxy_url:
+                            try:
+                                port_part = proxy_url.split('@')[-1].split(':')[-1]
+                                actual_proxy_port = port_part
+                            except:
                                 actual_proxy_port = '89'
-                            
-                            logging.info(f"[CHROME_PROXY_CHECK] Case 4: Port {old_port} already exists, retrying with port {new_port}")
-                            continue
                         else:
-                            # Lỗi khác, không retry
+                            actual_proxy_port = '89'
+                    else:
+                        actual_proxy_host = check_server if check_server else 'random-server'
+                        actual_proxy_port = '89'
+                    
+                    # Kiểm tra xem Gost đã được tạo và chạy chưa
+                    try:
+                        # Start Gost service
+                        import subprocess
+                        result = subprocess.run(
+                            f'bash manage_gost.sh restart-port {gost_port}',
+                            shell=True,
+                            cwd=BASE_DIR,
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        if result.returncode == 0:
+                            gost_created = True
                             break
-                    except:
-                        # Không parse được JSON, không retry
+                        else:
+                            # Kiểm tra xem có phải lỗi port đã được sử dụng không
+                            if 'already' in result.stderr.lower() or 'in use' in result.stderr.lower():
+                                retry_count += 1
+                                old_port = gost_port
+                                new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
+                                if new_port is None:
+                                    return jsonify({
+                                        'success': False,
+                                        'error': 'No available Gost ports found after retries'
+                                    }), 500
+                                gost_port = new_port
+                                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Port {old_port} already exists, retrying with port {new_port}")
+                                continue
+                            else:
+                                break
+                    except Exception as e:
+                        logging.error(f"[CHROME_PROXY_CHECK] Error starting Gost: {e}")
                         break
                 
-                if not haproxy_created:
+                if not gost_created:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to create HAProxy: {haproxy_response.text}'
+                        'error': f'Failed to create Gost on port {gost_port}'
                     }), 500
                 
-                return f'socks5://{client_host}:{new_port}:{actual_proxy_host}:{actual_proxy_port}'
+                return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
         except Exception as e:
             logging.error(f"[CHROME_PROXY_CHECK] Error: {str(e)}")

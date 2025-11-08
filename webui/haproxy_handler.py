@@ -185,8 +185,8 @@ def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_h
             
             # Validate and convert wg_ports to integers
             if not wg_ports:
-                # Default to port based on sock_port: 7891 -> 18181, 7892 -> 18182, etc.
-                wg_ports = [sock_port - 6000]  # 7891 - 6000 = 18181
+                # Default to same port as sock_port (Gost now runs directly on public ports)
+                wg_ports = [sock_port]
                 print(f"ℹ️  No Gost ports provided, using default: {wg_ports}")
             else:
                 # Convert to integers
@@ -200,10 +200,10 @@ def register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_h
                 
                 # Validate Gost ports are in valid range
                 for port in wg_ports:
-                    if port < 18181 or port > 18999:
+                    if port < 7891 or port > 7999:
                         return jsonify({
                             'success': False,
-                            'error': f'Invalid Gost port {port}. Must be between 18181-18999'
+                            'error': f'Invalid Gost port {port}. Must be between 7891-7999'
                         }), 400
             
             # Check if any Gost ports are already in use by other HAProxy instances

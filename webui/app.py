@@ -24,7 +24,8 @@ from proxy_api import proxy_api
 from nordvpn_handler import register_nordvpn_routes
 from protonvpn_handler import register_protonvpn_routes
 from gost_handler import register_gost_routes
-from haproxy_handler import register_haproxy_routes
+# HAProxy handler removed - Gost now runs directly on public ports
+# from haproxy_handler import register_haproxy_routes
 from chrome_handler import register_chrome_routes
 
 app = Flask(__name__)
@@ -88,37 +89,9 @@ def run_command(cmd, cwd=BASE_DIR, timeout=60):
         }
 
 def get_available_haproxy_ports():
-    """Dynamically scan for available HAProxy ports from config files"""
-    haproxy_ports = set()
-    
-    # Scan config files
-    config_dir = os.path.join(BASE_DIR, 'config')
-    if os.path.exists(config_dir):
-        for filename in os.listdir(config_dir):
-            if filename.startswith('haproxy_') and filename.endswith('.cfg'):
-                try:
-                    port = filename.replace('haproxy_', '').replace('.cfg', '')
-                    # Kiểm tra xem port có bị xóa không (có file lock)
-                    lock_file = os.path.join(LOG_DIR, f'deleted_port_{port}.lock')
-                    if not os.path.exists(lock_file):
-                        haproxy_ports.add(port)
-                except (ValueError, IndexError):
-                    pass
-    
-    # Scan PID files for running processes
-    if os.path.exists(LOG_DIR):
-        for filename in os.listdir(LOG_DIR):
-            if filename.startswith('haproxy_') and filename.endswith('.pid'):
-                try:
-                    port = filename.replace('haproxy_', '').replace('.pid', '')
-                    # Kiểm tra xem port có bị xóa không (có file lock)
-                    lock_file = os.path.join(LOG_DIR, f'deleted_port_{port}.lock')
-                    if not os.path.exists(lock_file):
-                        haproxy_ports.add(port)
-                except (ValueError, IndexError):
-                    pass
-    
-    return sorted(list(haproxy_ports))
+    """HAProxy removed - Gost now runs directly on public ports"""
+    # Return empty list - HAProxy is no longer used
+    return []
 
 def get_available_gost_ports():
     """Dynamically scan for available gost ports from config files"""
@@ -141,8 +114,8 @@ def is_valid_gost_port(port):
     """Check if port is a valid gost port using dynamic discovery"""
     try:
         port_num = int(port)
-        # Check if port is in valid range (18181-18999)
-        return 18181 <= port_num <= 18999
+        # Check if port is in valid range (7891-7999) - Gost now runs directly on public ports
+        return 7891 <= port_num <= 7999
     except (ValueError, TypeError):
         return False
 
@@ -262,19 +235,9 @@ def get_protonvpn_proxy_with_server(server):
         return None
 
 def trigger_health_check():
-    """Trigger HAProxy health monitors to check immediately by creating trigger file"""
-    try:
-        # Create trigger files for health monitors
-        available_ports = get_available_haproxy_ports()
-        for port in available_ports:
-            trigger_file = os.path.join(LOG_DIR, f'trigger_check_{port}')
-            try:
-                with open(trigger_file, 'w') as f:
-                    f.write('1')
-            except Exception:
-                pass
-    except Exception:
-        pass
+    """HAProxy removed - no health checks needed"""
+    # HAProxy health checks removed - Gost runs directly
+    pass
 
 @app.route('/')
 def index():
@@ -338,69 +301,17 @@ def api_status():
             except Exception as e:
                 print(f"Error processing gost port {port}: {e}")
         
-        # Lấy danh sách HAProxy ports
-        haproxy_ports = get_available_haproxy_ports()
-        haproxy_services = []
-        
-        for port in haproxy_ports:
-            try:
-                # Kiểm tra PID file
-                pid_file = os.path.join(LOG_DIR, f'haproxy_{port}.pid')
-                running = False
-                pid = None
-                
-                if os.path.exists(pid_file):
-                    try:
-                        with open(pid_file, 'r') as f:
-                            pid = f.read().strip()
-                        if pid:
-                            # Kiểm tra process có đang chạy không
-                            import subprocess
-                            result = subprocess.run(['ps', '-p', pid], capture_output=True, text=True)
-                            running = result.returncode == 0
-                    except:
-                        pass
-                
-                # Lấy thông tin backend từ config
-                gost_backend = None
-                try:
-                    config_path = os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg')
-                    if os.path.exists(config_path):
-                        with open(config_path, 'r') as f:
-                            content = f.read()
-                            # Tìm gost backend port
-                            import re
-                            match = re.search(r'server gost1 127\.0\.0\.1:(\d+)', content)
-                            if match:
-                                gost_backend = match.group(1)
-                except:
-                    pass
-                
-                # Tạo stats URL
-                stats_port = int(port) + 200
-                stats_url = f"http://127.0.0.1:{stats_port}/haproxy?stats"
-                
-                haproxy_services.append({
-                    'port': port,
-                    'name': f'HAProxy {port}',
-                    'running': running,
-                    'pid': pid if running else None,
-                    'gost_backend': gost_backend,
-                    'stats_url': stats_url
-                })
-            except Exception as e:
-                print(f"Error processing haproxy port {port}: {e}")
-        
+        # HAProxy removed - Gost now runs directly on public ports
         return jsonify({
             'gost': gost_services,
-            'haproxy': haproxy_services
+            'haproxy': []  # HAProxy no longer used
         })
         
     except Exception as e:
         return jsonify({
             'error': str(e),
             'gost': [],
-            'haproxy': []
+            'haproxy': []  # HAProxy no longer used
         }), 500
 
 @app.route('/api/test/proxy/<port>')
@@ -462,13 +373,7 @@ def api_logs(service):
         log_files = []
         
         # Determine log file paths based on service name
-        if service.startswith('haproxy'):
-            port = service.replace('haproxy', '')
-            log_files = [
-                os.path.join(LOG_DIR, f'haproxy_{port}.log'),
-                os.path.join(LOG_DIR, f'haproxy_health_{port}.log')
-            ]
-        elif service.startswith('gost') or service.startswith('wireproxy'):
+        if service.startswith('gost') or service.startswith('wireproxy'):
             port = service.replace('gost', '').replace('wireproxy', '')
             log_files = [
                 os.path.join(LOG_DIR, f'gost_{port}.log')
@@ -514,18 +419,16 @@ def api_logs(service):
 
 @app.route('/api/clear-all', methods=['POST'])
 def api_clear_all():
-    """Clear all Gost and HAProxy services"""
+    """Clear all Gost services"""
     try:
         stopped_services = []
         deleted_files = []
         
         # Get all available ports
         gost_ports = get_available_gost_ports()
-        haproxy_ports = get_available_haproxy_ports()
         
         print(f"🧹 Starting Clear All operation...")
         print(f"Found {len(gost_ports)} Gost ports: {gost_ports}")
-        print(f"Found {len(haproxy_ports)} HAProxy ports: {haproxy_ports}")
         
         # 1. Stop all Gost services
         for port in gost_ports:
@@ -548,51 +451,7 @@ def api_clear_all():
             except Exception as e:
                 print(f"⚠️  Error stopping Gost {port}: {e}")
         
-        # 2. Stop all HAProxy services (bỏ qua port 7890 - protected port)
-        PROTECTED_PORTS = {7890}
-        for port in haproxy_ports:
-            # Bỏ qua port được bảo vệ
-            if port in PROTECTED_PORTS:
-                print(f"🛡️  Skipping protected HAProxy instance {port}")
-                continue
-            try:
-                # Stop HAProxy process
-                pid_file = os.path.join(LOG_DIR, f'haproxy_{port}.pid')
-                if os.path.exists(pid_file):
-                    try:
-                        with open(pid_file) as f:
-                            pid = int(f.read().strip())
-                        os.kill(pid, 15)  # SIGTERM
-                        stopped_services.append(f"HAProxy {port} (PID {pid})")
-                        print(f"✓ Stopped HAProxy {port} (PID {pid})")
-                    except (OSError, ValueError):
-                        pass
-                    finally:
-                        try:
-                            os.remove(pid_file)
-                        except:
-                            pass
-                
-                # Stop health monitor process
-                health_pid_file = os.path.join(LOG_DIR, f'health_{port}.pid')
-                if os.path.exists(health_pid_file):
-                    try:
-                        with open(health_pid_file) as f:
-                            pid = int(f.read().strip())
-                        os.kill(pid, 15)  # SIGTERM
-                        stopped_services.append(f"Health Monitor {port} (PID {pid})")
-                        print(f"✓ Stopped Health Monitor {port} (PID {pid})")
-                    except (OSError, ValueError):
-                        pass
-                    finally:
-                        try:
-                            os.remove(health_pid_file)
-                        except:
-                            pass
-            except Exception as e:
-                print(f"⚠️  Error stopping HAProxy {port}: {e}")
-        
-        # 3. Force kill any remaining processes
+        # 2. Force kill any remaining processes
         try:
             import subprocess
             
@@ -601,17 +460,11 @@ def api_clear_all():
             if result.returncode == 0:
                 stopped_services.append("Remaining Gost processes")
                 print("✓ Force killed remaining Gost processes")
-            
-            # Kill any remaining haproxy processes
-            result = subprocess.run(['pkill', '-f', 'haproxy'], capture_output=True, text=True)
-            if result.returncode == 0:
-                stopped_services.append("Remaining HAProxy processes")
-                print("✓ Force killed remaining HAProxy processes")
                 
         except Exception as e:
             print(f"⚠️  Error force killing processes: {e}")
         
-        # 4. Delete all Gost configs and logs
+        # 3. Delete all Gost configs and logs
         for port in gost_ports:
             files_to_remove = [
                 (os.path.join(BASE_DIR, 'config', f'gost_{port}.config'), f'Gost config {port}'),
@@ -628,42 +481,10 @@ def api_clear_all():
                     except Exception as e:
                         print(f"⚠️  Error deleting {description}: {e}")
         
-        # 5. Delete all HAProxy configs and logs
-        for port in haproxy_ports:
-            files_to_remove = [
-                (os.path.join(BASE_DIR, 'config', f'haproxy_{port}.cfg'), f'HAProxy config {port}'),
-                (os.path.join(LOG_DIR, f'haproxy_{port}.log'), f'HAProxy log {port}'),
-                (os.path.join(LOG_DIR, f'haproxy_{port}.pid'), f'HAProxy PID {port}'),
-                (os.path.join(LOG_DIR, f'health_{port}.pid'), f'Health PID {port}'),
-                (os.path.join(LOG_DIR, f'haproxy_health_{port}.pid'), f'HAProxy Health PID {port}'),
-                (os.path.join(LOG_DIR, f'haproxy_health_{port}.log'), f'HAProxy Health log {port}'),
-                (os.path.join(LOG_DIR, f'last_backend_{port}'), f'Last backend {port}'),
-                (os.path.join(LOG_DIR, f'trigger_check_{port}'), f'Trigger check {port}')
-            ]
-            
-            for file_path, description in files_to_remove:
-                if os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                        deleted_files.append(description)
-                        print(f"✓ Deleted {description}")
-                    except Exception as e:
-                        print(f"⚠️  Error deleting {description}: {e}")
-        
-        # 6. Wait a moment to ensure processes are stopped
+        # 4. Wait a moment to ensure processes are stopped
         import time
         time.sleep(2)
         
-        # 7. Final cleanup - remove any remaining lock files
-        try:
-            for port in haproxy_ports:
-                lock_file = os.path.join(LOG_DIR, f'deleted_port_{port}.lock')
-                if os.path.exists(lock_file):
-                    os.remove(lock_file)
-                    deleted_files.append(f"Lock file {port}")
-                    print(f"✓ Removed lock file for port {port}")
-        except Exception as e:
-            print(f"⚠️  Error removing lock files: {e}")
         
         return jsonify({
             'success': True,
@@ -700,7 +521,8 @@ def _get_proxy_port(server_name, vpn_provider):
 register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_check, nordvpn_api, proxy_api)
 register_protonvpn_routes(app, save_gost_config, run_command, trigger_health_check, protonvpn_api, proxy_api)
 register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port, get_available_gost_ports)
-register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports)
+# HAProxy routes removed - Gost now runs directly on public ports
+# register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports)
 register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port)
 
 if __name__ == '__main__':
@@ -708,7 +530,7 @@ if __name__ == '__main__':
     os.makedirs(LOG_DIR, exist_ok=True)
     
     print("=" * 60)
-    print("🌐 HAProxy & Gost Web UI")
+    print("🌐 Gost Web UI")
     print("=" * 60)
     print(f"📂 Base Directory: {BASE_DIR}")
     print(f"📝 Log Directory: {LOG_DIR}")
