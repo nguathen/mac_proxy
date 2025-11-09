@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-HAProxy & Wireproxy Web UI
-Quản lý HAProxy và Wireproxy qua giao diện web
+Gost Web UI
+Quản lý Gost proxy services qua giao diện web
 """
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -12,7 +12,6 @@ import json
 import sys
 import requests
 from datetime import datetime
-import concurrent.futures
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,12 +23,10 @@ from proxy_api import proxy_api
 from nordvpn_handler import register_nordvpn_routes
 from protonvpn_handler import register_protonvpn_routes
 from gost_handler import register_gost_routes
-# HAProxy handler removed - Gost now runs directly on public ports
-# from haproxy_handler import register_haproxy_routes
 from chrome_handler import register_chrome_routes
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'haproxy-webui-secret-key-2025'
+app.config['SECRET_KEY'] = 'gost-webui-secret-key-2025'
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(BASE_DIR, 'logs')
@@ -89,8 +86,8 @@ def run_command(cmd, cwd=BASE_DIR, timeout=60):
         }
 
 def get_available_haproxy_ports():
-    """HAProxy removed - Gost now runs directly on public ports"""
-    # Return empty list - HAProxy is no longer used
+    """Deprecated - kept for API compatibility with chrome_handler"""
+    # HAProxy removed - Gost now runs directly on public ports (7891-7999)
     return []
 
 def get_available_gost_ports():
@@ -235,7 +232,7 @@ def get_protonvpn_proxy_with_server(server):
         return None
 
 def trigger_health_check():
-    """HAProxy removed - no health checks needed"""
+    """Deprecated - kept for API compatibility with VPN handlers"""
     # HAProxy health checks removed - Gost runs directly
     pass
 
@@ -311,7 +308,7 @@ def api_status():
         return jsonify({
             'error': str(e),
             'gost': [],
-            'haproxy': []  # HAProxy no longer used
+            'haproxy': []  # Deprecated - kept for API compatibility
         }), 500
 
 @app.route('/api/test/proxy/<port>')
@@ -521,7 +518,7 @@ def _get_proxy_port(server_name, vpn_provider):
 register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_check, nordvpn_api, proxy_api)
 register_protonvpn_routes(app, save_gost_config, run_command, trigger_health_check, protonvpn_api, proxy_api)
 register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port, get_available_gost_ports)
-# HAProxy routes removed - Gost now runs directly on public ports
+# HAProxy routes removed - Gost now runs directly on public ports (7891-7999)
 # register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports)
 register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port)
 

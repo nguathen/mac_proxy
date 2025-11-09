@@ -173,7 +173,7 @@ def _find_available_port(start_port, used_ports, BASE_DIR, max_port=7999):
     return None
 
 def _find_orphaned_gost_for_port(requested_port):
-    """Tìm Gost đang chạy với port yêu cầu (không còn HAProxy nữa)"""
+    """Tìm Gost đang chạy với port yêu cầu"""
     try:
         # Lấy danh sách services
         status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🛑 Stopping HAProxy Multi-Instance System"
+echo "🛑 Stopping Gost Proxy System"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Dừng Auto Credential Updater
@@ -45,39 +45,11 @@ if [ -f "manage_gost.sh" ]; then
 fi
 
 
-# Dừng health monitors
-echo ""
-echo "🛑 Stopping health monitors..."
-for pid_file in logs/health_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/health_//')
-        pid=$(cat "$pid_file")
-        kill "$pid" 2>/dev/null && echo "✓ Stopped health monitor for port $port (PID $pid)" || true
-        rm -f "$pid_file"
-    fi
-done
+# Health monitors removed - Gost runs directly
 
-# Dừng HAProxy processes (bỏ qua port 7890 - protected port)
-echo ""
-echo "🛑 Stopping HAProxy processes..."
-PROTECTED_PORTS="7890"
-for pid_file in logs/haproxy_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
-        # Bỏ qua port được bảo vệ
-        if [[ "$PROTECTED_PORTS" == *"$port"* ]]; then
-            echo "🛡️  Skipping protected HAProxy instance $port"
-            continue
-        fi
-        pid=$(cat "$pid_file")
-        kill "$pid" 2>/dev/null && echo "✓ Stopped HAProxy instance $port (PID $pid)" || true
-        rm -f "$pid_file"
-    fi
-done
-
+# HAProxy removed - Gost now runs directly on public ports
 # Cleanup any remaining processes
-pkill -f "haproxy.*config/haproxy_" 2>/dev/null || true
-pkill -f "setup_haproxy.sh" 2>/dev/null || true
+pkill -f "gost.*socks5" 2>/dev/null || true
 
 sleep 1
 
@@ -86,19 +58,14 @@ echo ""
 echo "🔍 Verifying shutdown..."
 still_running=false
 
-if pgrep -f "haproxy.*config/haproxy_" > /dev/null; then
-    echo "⚠️  Some HAProxy processes still running"
-    still_running=true
-fi
-
-if pgrep -f "setup_haproxy.sh" > /dev/null; then
-    echo "⚠️  Some health monitor processes still running"
+if pgrep -f "gost.*socks5" > /dev/null; then
+    echo "⚠️  Some Gost processes still running"
     still_running=true
 fi
 
 if [ "$still_running" = true ]; then
     echo ""
-    echo "💡 Use force kill: pkill -9 -f haproxy"
+    echo "💡 Use force kill: pkill -9 -f gost"
 else
     echo "✅ All processes stopped successfully"
 fi

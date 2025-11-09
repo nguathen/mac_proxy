@@ -480,7 +480,7 @@ case "${1:-}" in
     restart-instance)
         if [ $# -lt 2 ]; then
             echo "Usage: $0 restart-instance <port>"
-            echo "  port: 18181-18187"
+            echo "  port: 7891-7999"
             exit 1
         fi
         restart_gost_port "$2"
@@ -488,7 +488,7 @@ case "${1:-}" in
     restart-port)
         if [ $# -lt 2 ]; then
             echo "Usage: $0 restart-port <port>"
-            echo "  port: 18181-18187"
+            echo "  port: 7891-7999"
             exit 1
         fi
         restart_gost_port "$2"
@@ -499,7 +499,7 @@ case "${1:-}" in
     config)
         if [ $# -lt 6 ]; then
             echo "Usage: $0 config <port> <provider> <country> <proxy_host> <proxy_port>"
-            echo "  port: 18181-18187"
+            echo "  port: 7891-7999"
             echo "  provider: nordvpn, protonvpn"
             echo "  country: server identifier"
             echo "  proxy_host: proxy hostname"
@@ -529,11 +529,11 @@ case "${1:-}" in
         echo "  update-protonvpn-auth    - Update auth for all ProtonVPN services"
         echo ""
         echo "Examples:"
-        echo "  $0 config 18181 protonvpn node-uk-29.protonvpn.net"
-        echo "  $0 config 18182 nordvpn us"
-        echo "  $0 restart-instance 18182"
-        echo "  $0 restart-port 18182"
-        echo "  $0 show-config 18181"
+        echo "  $0 config 7891 protonvpn node-uk-29.protonvpn.net"
+        echo "  $0 config 7892 nordvpn us"
+        echo "  $0 restart-instance 7892"
+        echo "  $0 restart-port 7892"
+        echo "  $0 show-config 7891"
         echo "  $0 show-config"
         exit 1
         ;;
