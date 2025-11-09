@@ -18,6 +18,21 @@ log "━━━━━━━━━━━━━━━━━━━━━━━━━
 log "🚀 Starting Mac Proxy App"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Khởi động HAProxy 7890
+log "🚀 Starting HAProxy 7890..."
+if [ -f "$SCRIPT_DIR/services/haproxy_7890/start_haproxy_7890.sh" ]; then
+    cd "$SCRIPT_DIR/services/haproxy_7890"
+    chmod +x start_haproxy_7890.sh
+    ./start_haproxy_7890.sh >> "$SCRIPT_DIR/logs/haproxy_7890_launch.log" 2>&1 || true
+    cd "$SCRIPT_DIR"
+    log "✅ HAProxy 7890 started"
+else
+    log "⚠️  HAProxy 7890 script not found"
+fi
+
+# Đợi một chút để HAProxy khởi động
+sleep 2
+
 # Khởi động WebUI
 log "🌐 Starting Web UI..."
 if [ -f "$SCRIPT_DIR/start_webui_daemon.sh" ]; then
