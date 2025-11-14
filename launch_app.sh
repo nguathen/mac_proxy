@@ -46,6 +46,28 @@ fi
 # Đợi một chút để WebUI khởi động
 sleep 3
 
+# Khởi động Auto Credential Updater (tự động clear sau 5 phút)
+log "🔄 Starting Auto Credential Updater..."
+if [ -f "$SCRIPT_DIR/start_auto_updater.sh" ]; then
+    chmod +x "$SCRIPT_DIR/start_auto_updater.sh"
+    "$SCRIPT_DIR/start_auto_updater.sh" start >> "$LOG_FILE" 2>&1 || true
+    log "✅ Auto Credential Updater started"
+else
+    log "⚠️  Auto Credential Updater script not found"
+fi
+
+# Khởi động HAProxy monitor (tự động restart nếu lỗi)
+log "🛡️  Starting HAProxy Monitor..."
+if [ -f "$SCRIPT_DIR/services/haproxy_7890/haproxy_monitor.sh" ]; then
+    cd "$SCRIPT_DIR/services/haproxy_7890"
+    chmod +x haproxy_monitor.sh
+    ./haproxy_monitor.sh start >> "$SCRIPT_DIR/logs/haproxy_monitor_launchd.log" 2>&1 || true
+    cd "$SCRIPT_DIR"
+    log "✅ HAProxy Monitor started"
+else
+    log "⚠️  HAProxy Monitor script not found"
+fi
+
 # Khởi động WARP monitor
 log "🛡️  Starting WARP Monitor..."
 if [ -f "$SCRIPT_DIR/services/haproxy_7890/warp_monitor.sh" ]; then
