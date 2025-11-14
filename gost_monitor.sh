@@ -45,7 +45,8 @@ check_gost_proxy() {
     local port=$1
     
     # Kiểm tra proxy có hoạt động không (với timeout ngắn)
-    if timeout 10 bash -c "curl -s --connect-timeout 5 --max-time 8 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1"; then
+    # macOS không có timeout command, dùng curl với timeout options
+    if curl -s --connect-timeout 5 --max-time 8 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
         return 0  # Working
     else
         return 1  # Not working
@@ -243,8 +244,8 @@ case "${1:-}" in
             if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
                 echo "✅ Gost monitor đang chạy (PID: $pid)"
                 
-                local ports=$(get_gost_ports)
-                local all_ok=true
+                ports=$(get_gost_ports)
+                all_ok=true
                 for port in $ports; do
                     if check_gost_process "$port" && check_gost_proxy "$port"; then
                         echo "   ✅ Port $port: Running và hoạt động"
@@ -267,8 +268,8 @@ case "${1:-}" in
         ;;
     check)
         # One-time check và restart nếu cần
-        local ports=$(get_gost_ports)
-        local restarted_any=false
+        ports=$(get_gost_ports)
+        restarted_any=false
         
         for port in $ports; do
             if ! check_gost_process "$port" || ! check_gost_proxy "$port"; then

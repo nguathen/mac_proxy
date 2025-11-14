@@ -557,7 +557,30 @@ def api_monitor_action(action):
     try:
         result = run_command(f'bash {monitor_script} {action}', timeout=30)
         
-        if result['success']:
+        # Với action 'check', exit code 1 có nghĩa là đã restart (không phải lỗi)
+        if action == 'check':
+            output = result['stdout'] or result['stderr'] or ''
+            if result['returncode'] == 0:
+                return jsonify({
+                    'success': True,
+                    'message': 'All gost services are working',
+                    'output': output
+                })
+            elif result['returncode'] == 1:
+                # Exit code 1 có nghĩa là đã restart một số services
+                return jsonify({
+                    'success': True,
+                    'message': 'Some gost services were restarted',
+                    'output': output
+                })
+            else:
+                # Các exit code khác là lỗi thật sự
+                return jsonify({
+                    'success': False,
+                    'error': result['stderr'] or 'Unknown error',
+                    'output': output
+                }), 500
+        elif result['success']:
             return jsonify({
                 'success': True,
                 'message': f'Monitor {action} successful',

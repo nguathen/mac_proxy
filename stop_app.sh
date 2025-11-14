@@ -84,6 +84,26 @@ else
     log "⚠️  HAProxy 7890 stop script not found"
 fi
 
+# Dừng Gost Monitor
+log "🛑 Stopping Gost Monitor..."
+if [ -f "$SCRIPT_DIR/gost_monitor.sh" ]; then
+    chmod +x "$SCRIPT_DIR/gost_monitor.sh"
+    "$SCRIPT_DIR/gost_monitor.sh" stop >> "$SCRIPT_DIR/logs/gost_monitor.log" 2>&1 || true
+    log "✅ Gost Monitor stopped"
+else
+    log "⚠️  Gost Monitor script not found"
+fi
+
+# Dừng Gost Services
+log "🛑 Stopping Gost Services..."
+if [ -f "$SCRIPT_DIR/manage_gost.sh" ]; then
+    chmod +x "$SCRIPT_DIR/manage_gost.sh"
+    "$SCRIPT_DIR/manage_gost.sh" stop >> "$LOG_FILE" 2>&1 || true
+    log "✅ Gost Services stopped"
+else
+    log "⚠️  Gost management script not found"
+fi
+
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log "✅ App stopped successfully"
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
