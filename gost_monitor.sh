@@ -2,7 +2,8 @@
 # gost_monitor.sh
 # Auto-restart gost nếu connection fail
 
-set -euo pipefail
+# Không dùng set -e trong script này vì monitor loop cần tiếp tục chạy ngay cả khi có lỗi
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -10,7 +11,7 @@ cd "$SCRIPT_DIR"
 LOG_DIR="./logs"
 LOG_FILE="$LOG_DIR/gost_monitor.log"
 PID_FILE="$LOG_DIR/gost_monitor.pid"
-CHECK_INTERVAL=30  # Kiểm tra mỗi 30 giây
+CHECK_INTERVAL=10  # Kiểm tra mỗi 10 giây để phát hiện lỗi nhanh hơn
 CONFIG_DIR="./config"
 MANAGE_GOST_SCRIPT="./manage_gost.sh"
 
@@ -63,16 +64,35 @@ restart_gost_port() {
         return 1
     fi
     
-    # Sử dụng manage_gost.sh để restart
-    local result=$(bash "$MANAGE_GOST_SCRIPT" restart-port "$port" 2>&1)
-    local exit_code=$?
+    # Sử dụng manage_gost.sh để restart với error handling
+    local result=""
+    local exit_code=1
+    
+    # Tắt exit on error tạm thời để không crash script
+    set +e
+    result=$(bash "$MANAGE_GOST_SCRIPT" restart-port "$port" 2>&1)
+    exit_code=$?
+    set -e
     
     if [ $exit_code -eq 0 ]; then
         # Đợi một chút để gost khởi động
         sleep 3
         
-        # Kiểm tra lại
-        if check_gost_process "$port" && check_gost_proxy "$port"; then
+        # Kiểm tra lại với error handling
+        set +e
+        local process_ok=false
+        local proxy_ok=false
+        
+        if check_gost_process "$port"; then
+            process_ok=true
+        fi
+        
+        if check_gost_proxy "$port"; then
+            proxy_ok=true
+        fi
+        set -e
+        
+        if [ "$process_ok" = true ] && [ "$proxy_ok" = true ]; then
             log "✅ Gost on port $port restarted successfully"
             return 0
         else
@@ -104,8 +124,8 @@ get_gost_ports() {
 monitor_loop() {
     log "🛡️  Gost monitor started (check interval: ${CHECK_INTERVAL}s)"
     
-    local reconnect_cooldown=120  # Cooldown 2 phút sau mỗi lần restart
-    local max_failures=3  # Sau 3 lần kiểm tra thất bại mới restart
+    local reconnect_cooldown=60  # Cooldown 1 phút sau mỗi lần restart (giảm từ 2 phút)
+    local max_failures=2  # Sau 2 lần kiểm tra thất bại mới restart (giảm từ 3 để restart nhanh hơn)
     
     # Initialize failure counters for each port
     local ports=$(get_gost_ports)
@@ -113,13 +133,29 @@ monitor_loop() {
         log "⚠️  No gost configs found, monitor will check periodically"
     fi
     
+    # Trap để log khi exit
+    trap 'log "⚠️  Monitor loop exiting (PID: $$)"' EXIT
+    
     while true; do
+        # Thêm error handling để tránh crash
+        set +e  # Tạm thời tắt exit on error
+        
         local current_time=$(date +%s)
         
         # Lấy danh sách ports hiện tại (có thể thay đổi)
-        local current_ports=$(get_gost_ports)
+        local current_ports=$(get_gost_ports 2>/dev/null || echo "")
+        
+        # Nếu không có ports, đợi và tiếp tục
+        if [ -z "$current_ports" ]; then
+            sleep "$CHECK_INTERVAL"
+            continue
+        fi
         
         for port in $current_ports; do
+            # Skip nếu port rỗng
+            if [ -z "$port" ]; then
+                continue
+            fi
             # Sử dụng file để lưu trữ failure count và last restart time
             local failure_file="$LOG_DIR/gost_${port}_failures.txt"
             local restart_file="$LOG_DIR/gost_${port}_restart_time.txt"
@@ -189,6 +225,8 @@ monitor_loop() {
                 fi
             fi
         done
+        
+        set -e  # Bật lại exit on error
         
         sleep "$CHECK_INTERVAL"
     done
