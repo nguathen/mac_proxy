@@ -224,6 +224,11 @@ start_gost() {
                 fi
                 
                 # Khởi động gost với socks5 proxy
+                # Thêm các options để cải thiện stability:
+                # -L: listener (socks5 server)
+                # -F: forwarder (upstream proxy)
+                # -D: debug mode (optional, có thể bỏ nếu không cần)
+                # Gost tự động retry và reconnect khi connection drop
                 nohup $GOST_BIN -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"
@@ -349,6 +354,10 @@ restart_gost_port() {
         fi
         
         # Khởi động gost với socks5 proxy
+        # Thêm các options để cải thiện stability:
+        # -L: listener (socks5 server)
+        # -F: forwarder (upstream proxy)
+        # Gost tự động retry và reconnect khi connection drop
         nohup $GOST_BIN -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
         local pid=$!
         echo $pid > "$pid_file"

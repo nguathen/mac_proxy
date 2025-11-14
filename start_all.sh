@@ -76,6 +76,17 @@ else
     echo "⚠️  WARP Monitor script not found"
 fi
 
+# Khởi động Gost Monitor
+echo ""
+echo "🛡️  Starting Gost Monitor..."
+if [ -f "gost_monitor.sh" ]; then
+    chmod +x gost_monitor.sh
+    ./gost_monitor.sh start 2>/dev/null || true
+    echo "✅ Gost Monitor started"
+else
+    echo "⚠️  Gost Monitor script not found"
+fi
+
 # Hiển thị trạng thái
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -103,6 +114,11 @@ echo "🛡️  WARP Monitor:"
 echo "   • Tự động kiểm tra và reconnect WARP nếu cần"
 echo "   • Check interval: 30 giây"
 echo "   • Log: services/haproxy_7890/logs/warp_monitor.log"
+echo ""
+echo "🛡️  Gost Monitor:"
+echo "   • Tự động kiểm tra và restart gost khi connection fail"
+echo "   • Check interval: 30 giây"
+echo "   • Log: logs/gost_monitor.log"
 echo ""
 echo "📝 Lệnh hữu ích:"
 echo "   • Kiểm tra trạng thái: ./status_all.sh"

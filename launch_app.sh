@@ -80,6 +80,29 @@ else
     log "⚠️  WARP Monitor script not found"
 fi
 
+# Khởi động Gost services
+log "🔐 Starting Gost Services..."
+if [ -f "$SCRIPT_DIR/manage_gost.sh" ]; then
+    chmod +x "$SCRIPT_DIR/manage_gost.sh"
+    "$SCRIPT_DIR/manage_gost.sh" start >> "$LOG_FILE" 2>&1 || true
+    log "✅ Gost Services started"
+else
+    log "⚠️  Gost management script not found"
+fi
+
+# Đợi một chút để Gost khởi động
+sleep 2
+
+# Khởi động Gost Monitor
+log "🛡️  Starting Gost Monitor..."
+if [ -f "$SCRIPT_DIR/gost_monitor.sh" ]; then
+    chmod +x "$SCRIPT_DIR/gost_monitor.sh"
+    "$SCRIPT_DIR/gost_monitor.sh" start >> "$SCRIPT_DIR/logs/gost_monitor.log" 2>&1 || true
+    log "✅ Gost Monitor started"
+else
+    log "⚠️  Gost Monitor script not found"
+fi
+
 log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log "✅ App started successfully"
 log "📊 Web UI: http://127.0.0.1:5000"

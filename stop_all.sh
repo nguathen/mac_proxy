@@ -36,6 +36,14 @@ if [ -f "services/haproxy_7890/warp_monitor.sh" ]; then
     cd ../..
 fi
 
+# Dừng Gost Monitor
+echo ""
+echo "🛑 Stopping Gost Monitor..."
+if [ -f "gost_monitor.sh" ]; then
+    chmod +x gost_monitor.sh
+    ./gost_monitor.sh stop 2>/dev/null || true
+fi
+
 # Dừng Gost
 echo ""
 echo "🛑 Stopping gost instances..."

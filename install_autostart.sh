@@ -43,6 +43,16 @@ else
     exit 1
 fi
 
+# Cài đặt Gost Monitor autostart
+echo ""
+echo "🛡️  Cài đặt Gost Monitor autostart..."
+if [ -f "$SCRIPT_DIR/install_gostmonitor_autostart.sh" ]; then
+    chmod +x "$SCRIPT_DIR/install_gostmonitor_autostart.sh"
+    "$SCRIPT_DIR/install_gostmonitor_autostart.sh" 2>/dev/null || echo "⚠️  Gost Monitor autostart có thể đã được cài đặt"
+else
+    echo "⚠️  Gost Monitor install script not found"
+fi
+
 # Verify (kiểm tra file plist và service)
 sleep 1
 if [ -f "$PLIST_DEST" ]; then

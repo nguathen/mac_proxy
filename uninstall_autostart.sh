@@ -24,6 +24,15 @@ if [ -f "$PLIST_DEST" ]; then
     rm -f "$PLIST_DEST"
 fi
 
+# Gỡ cài đặt Gost Monitor autostart
+echo ""
+echo "🛡️  Gỡ cài đặt Gost Monitor autostart..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/uninstall_gostmonitor_autostart.sh" ]; then
+    chmod +x "$SCRIPT_DIR/uninstall_gostmonitor_autostart.sh"
+    "$SCRIPT_DIR/uninstall_gostmonitor_autostart.sh" 2>/dev/null || true
+fi
+
 # Verify
 if launchctl list | grep -q "com.macproxy.startup"; then
     echo ""

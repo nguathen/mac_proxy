@@ -298,17 +298,39 @@ def api_status():
             except Exception as e:
                 print(f"Error processing gost port {port}: {e}")
         
+        # Kiểm tra Gost Monitor status
+        monitor_running = False
+        monitor_pid = None
+        try:
+            monitor_pid_file = os.path.join(LOG_DIR, 'gost_monitor.pid')
+            if os.path.exists(monitor_pid_file):
+                with open(monitor_pid_file, 'r') as f:
+                    monitor_pid = f.read().strip()
+                if monitor_pid:
+                    result = subprocess.run(['ps', '-p', monitor_pid], capture_output=True, text=True)
+                    monitor_running = result.returncode == 0
+        except:
+            pass
+        
         # HAProxy removed - Gost now runs directly on public ports
         return jsonify({
             'gost': gost_services,
-            'haproxy': []  # HAProxy no longer used
+            'haproxy': [],  # HAProxy no longer used
+            'monitor': {
+                'running': monitor_running,
+                'pid': monitor_pid if monitor_running else None
+            }
         })
         
     except Exception as e:
         return jsonify({
             'error': str(e),
             'gost': [],
-            'haproxy': []  # Deprecated - kept for API compatibility
+            'haproxy': [],  # Deprecated - kept for API compatibility
+            'monitor': {
+                'running': False,
+                'pid': None
+            }
         }), 500
 
 @app.route('/api/test/proxy/<port>')
@@ -513,6 +535,45 @@ def _get_proxy_port(server_name, vpn_provider):
             pass
         return 4443  # Default ProtonVPN port
 
+
+# Gost Monitor API routes
+@app.route('/api/monitor/<action>', methods=['POST'])
+def api_monitor_action(action):
+    """Điều khiển Gost Monitor"""
+    monitor_script = os.path.join(BASE_DIR, 'gost_monitor.sh')
+    
+    if not os.path.exists(monitor_script):
+        return jsonify({
+            'success': False,
+            'error': 'Gost monitor script not found'
+        }), 404
+    
+    if action not in ['start', 'stop', 'status', 'check']:
+        return jsonify({
+            'success': False,
+            'error': f'Invalid action: {action}'
+        }), 400
+    
+    try:
+        result = run_command(f'bash {monitor_script} {action}', timeout=30)
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'message': f'Monitor {action} successful',
+                'output': result['stdout']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['stderr'] or 'Unknown error',
+                'output': result['stdout']
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # Register all routes
 register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_check, nordvpn_api, proxy_api)

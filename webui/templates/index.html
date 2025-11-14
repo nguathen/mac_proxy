@@ -316,6 +316,26 @@
                 </div>
             </div>
             
+            <!-- Gost Monitor Card -->
+            <div class="card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white;">
+                <h2 style="color: white;">🛡️ Gost Monitor</h2>
+                <div id="monitor-status" style="color: rgba(255,255,255,0.9); margin-bottom: 15px;">
+                    <div class="service-info" style="color: rgba(255,255,255,0.9);">
+                        <span class="status-indicator" id="monitor-indicator" style="background: #ef4444;"></span>
+                        <span id="monitor-status-text">Đang kiểm tra...</span>
+                    </div>
+                    <div class="service-info" id="monitor-pid" style="color: rgba(255,255,255,0.8); font-size: 0.9em; margin-top: 5px;"></div>
+                </div>
+                <p style="color: rgba(255,255,255,0.9); margin-bottom: 20px; font-size: 0.9em;">
+                    Tự động kiểm tra và restart gost khi connection fail. Check mỗi 30 giây.
+                </p>
+                <div class="btn-group">
+                    <button class="btn" style="background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3);" onclick="controlMonitor('start')" id="monitor-start-btn">Start Monitor</button>
+                    <button class="btn" style="background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3);" onclick="controlMonitor('stop')" id="monitor-stop-btn">Stop Monitor</button>
+                    <button class="btn" style="background: rgba(255,255,255,0.2); color: white; border: 2px solid rgba(255,255,255,0.3);" onclick="controlMonitor('check')" id="monitor-check-btn">Check Now</button>
+                </div>
+            </div>
+            
             <!-- HTTPS Proxy Card -->
             
         </div>
@@ -486,6 +506,35 @@
                 `}).join('');
                 document.getElementById('gost-status').innerHTML = gostHtml;
                 
+                // Update Monitor status
+                if (data.monitor) {
+                    const monitor = data.monitor;
+                    const indicator = document.getElementById('monitor-indicator');
+                    const statusText = document.getElementById('monitor-status-text');
+                    const pidText = document.getElementById('monitor-pid');
+                    const startBtn = document.getElementById('monitor-start-btn');
+                    const stopBtn = document.getElementById('monitor-stop-btn');
+                    
+                    if (monitor.running) {
+                        indicator.style.background = '#10b981';
+                        indicator.style.boxShadow = '0 0 10px #10b981';
+                        statusText.textContent = '✅ Monitor đang chạy';
+                        if (monitor.pid) {
+                            pidText.textContent = `PID: ${monitor.pid}`;
+                        } else {
+                            pidText.textContent = '';
+                        }
+                        startBtn.disabled = true;
+                        stopBtn.disabled = false;
+                    } else {
+                        indicator.style.background = '#ef4444';
+                        indicator.style.boxShadow = '0 0 10px #ef4444';
+                        statusText.textContent = '❌ Monitor đã dừng';
+                        pidText.textContent = '';
+                        startBtn.disabled = false;
+                        stopBtn.disabled = true;
+                    }
+                }
                 
                 // HAProxy section removed - Gost now runs directly on public ports
                 
@@ -548,6 +597,44 @@
                 }
             } catch (error) {
                 console.error('Gost control error:', error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+        
+        async function controlMonitor(action) {
+            let confirmMsg = '';
+            if (action === 'start') {
+                confirmMsg = 'Bạn có chắc muốn khởi động Gost Monitor?';
+            } else if (action === 'stop') {
+                confirmMsg = 'Bạn có chắc muốn dừng Gost Monitor?';
+            } else if (action === 'check') {
+                confirmMsg = 'Kiểm tra và restart gost nếu cần?';
+            }
+            
+            if (confirmMsg && !confirm(confirmMsg)) return;
+            
+            try {
+                const response = await fetch(`/api/monitor/${action}`, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`${data.message || 'Monitor ' + action + ' successful!'}`);
+                    loadStatus();
+                } else {
+                    alert(`Error: ${data.error || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Monitor control error:', error);
                 alert(`Error: ${error.message}`);
             }
         }
