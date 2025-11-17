@@ -73,7 +73,7 @@ File config JSON:
 
 ## 🔄 Quy trình khởi động
 
-1. **Cập nhật credentials**: Gọi API `http://localhost:5267/mmo/getpassproxy`
+1. **Cập nhật credentials**
 2. **Đọc cấu hình**: Load từ file `logs/gost{instance}.config`
 3. **Cập nhật proxy URL**: Nếu là ProtonVPN, cập nhật lại URL với credentials mới
 4. **Khởi động gost**: `gost -L socks5://:port -F proxy_url`

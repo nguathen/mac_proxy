@@ -15,6 +15,12 @@ import threading
 import signal
 import sys
 
+# Import protonvpn_service để lấy credentials
+try:
+    from protonvpn_service import Instance as ProtonVpnServiceInstance
+except ImportError:
+    ProtonVpnServiceInstance = None
+
 class AutoCredentialUpdater:
     def __init__(self, base_dir: str = "/Volumes/Ssd/Projects/mac_proxy"):
         self.base_dir = base_dir
@@ -185,11 +191,14 @@ class AutoCredentialUpdater:
         return False
         
     def _get_fresh_auth_token(self) -> Optional[str]:
-        """Lấy auth token mới từ API"""
+        """Lấy auth token mới từ protonvpn_service (config_token.txt)"""
         try:
-            response = requests.get("http://localhost:5267/mmo/getpassproxy", timeout=10)
-            if response.status_code == 200:
-                return response.text.strip()
+            # Sử dụng protonvpn_service để lấy password
+            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.password:
+                return ProtonVpnServiceInstance.password
+            else:
+                print("❌ Failed to get ProtonVPN password from protonvpn_service")
+                return None
         except Exception as e:
             print(f"❌ Error getting fresh auth token: {e}")
         return None

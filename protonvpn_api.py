@@ -9,6 +9,12 @@ import json
 from typing import List, Dict, Optional
 import os
 
+# Import protonvpn_service để lấy credentials từ config_token.txt
+try:
+    from protonvpn_service import Instance as ProtonVpnServiceInstance
+except ImportError:
+    ProtonVpnServiceInstance = None
+
 PROTONVPN_API_URL = "https://account.proton.me/api/vpn/v1/logicals"
 CACHE_FILE = "protonvpn_servers_cache.json"
 CACHE_DURATION = 3600  # 1 hour
@@ -31,28 +37,43 @@ class ProtonVPNAPI:
         self.uid = uid or PROTONVPN_AUTH.get('uid', '')
     
     def _refresh_credentials(self):
-        """Lấy token và uid mới từ API"""
+        """Lấy token và uid mới từ protonvpn_service (config_token.txt)"""
         try:
-            response = requests.get('http://localhost:5267/mmo/GetAuthProtonVpn', timeout=5)
-            if response.status_code == 200:
-                data = response.text.strip()
-                # Format: token:uid
-                if ':' in data:
-                    parts = data.split(':', 1)
-                    self.bearer_token = parts[0]
-                    self.uid = parts[1]
+            # Sử dụng protonvpn_service để lấy credentials từ config_token.txt
+            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.model:
+                model = ProtonVpnServiceInstance.model
+                self.bearer_token = model.get('token', '')
+                self.uid = model.get('uid', '')
+                if self.bearer_token and self.uid:
                     return True
-                else:
-                    # Try JSON format
-                    try:
-                        json_data = response.json()
-                        self.bearer_token = json_data.get('token', '')
-                        self.uid = json_data.get('uid', '')
-                        return bool(self.bearer_token and self.uid)
-                    except:
-                        pass
+            
+            # Fallback: thử load từ file trực tiếp nếu service không có
+            config_file = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "proton_data",
+                "config_token.txt"
+            )
+            if os.path.exists(config_file):
+                model = {}
+                with open(config_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or '=' not in line:
+                            continue
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        if key == 'UID':
+                            model['uid'] = value
+                        elif key == 'AccessToken':
+                            model['token'] = value
+                
+                if model.get('token') and model.get('uid'):
+                    self.bearer_token = model['token']
+                    self.uid = model['uid']
+                    return True
         except Exception as e:
-            print(f"Failed to refresh credentials: {e}")
+            print(f"Failed to refresh credentials from config_token.txt: {e}")
         return False
     
     def fetch_servers(self, force_refresh=False) -> List[Dict]:

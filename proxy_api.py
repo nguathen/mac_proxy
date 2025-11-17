@@ -10,6 +10,12 @@ import re
 from typing import Optional, Dict, Any
 import os
 
+# Import protonvpn_service để lấy credentials
+try:
+    from protonvpn_service import Instance as ProtonVpnServiceInstance
+except ImportError:
+    ProtonVpnServiceInstance = None
+
 class ProxyAPI:
     def __init__(self):
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,25 +40,24 @@ class ProxyAPI:
     def get_protonvpn_proxy(self, country: str = None) -> Optional[str]:
         """
         Lấy thông tin proxy ProtonVPN
-        Gọi API http://localhost:5267/mmo/getpassproxy để lấy user:pass
+        Sử dụng protonvpn_service.Instance để lấy user:pass từ config_token.txt
         Tính port = server_label + 4443
         """
         try:
-            # Gọi API để lấy user:pass
-            response = requests.get("http://localhost:5267/mmo/getpassproxy", timeout=10)
-            if response.status_code == 200:
-                user_pass = response.text.strip()
-                
-                # Tính port từ server label
-                server_label = self._extract_server_label(country)
-                port = server_label + 4443
-                
-                # Tạo proxy URL
-                proxy_url = f"https://{user_pass}@{country}:{port}"
-                return proxy_url
+            # Lấy credentials từ protonvpn_service
+            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.user_name and ProtonVpnServiceInstance.password:
+                user_pass = f"{ProtonVpnServiceInstance.user_name}:{ProtonVpnServiceInstance.password}"
             else:
-                print(f"Failed to get ProtonVPN credentials: {response.status_code}")
+                print("Failed to get ProtonVPN credentials from protonvpn_service")
                 return None
+            
+            # Tính port từ server label
+            server_label = self._extract_server_label(country)
+            port = server_label + 4443
+            
+            # Tạo proxy URL
+            proxy_url = f"https://{user_pass}@{country}:{port}"
+            return proxy_url
         except Exception as e:
             print(f"Error getting ProtonVPN proxy: {e}")
             return None
@@ -60,21 +65,20 @@ class ProxyAPI:
     def get_protonvpn_proxy_with_port(self, country: str, port: int) -> Optional[str]:
         """
         Lấy thông tin proxy ProtonVPN với port cụ thể
-        Gọi API http://localhost:5267/mmo/getpassproxy để lấy user:pass
+        Sử dụng protonvpn_service.Instance để lấy user:pass từ config_token.txt
         Sử dụng port được truyền vào thay vì tính từ server label
         """
         try:
-            # Gọi API để lấy user:pass
-            response = requests.get("http://localhost:5267/mmo/getpassproxy", timeout=10)
-            if response.status_code == 200:
-                user_pass = response.text.strip()
-                
-                # Tạo proxy URL với port cụ thể
-                proxy_url = f"https://{user_pass}@{country}:{port}"
-                return proxy_url
+            # Lấy credentials từ protonvpn_service
+            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.user_name and ProtonVpnServiceInstance.password:
+                user_pass = f"{ProtonVpnServiceInstance.user_name}:{ProtonVpnServiceInstance.password}"
             else:
-                print(f"Failed to get ProtonVPN credentials: {response.status_code}")
+                print("Failed to get ProtonVPN credentials from protonvpn_service")
                 return None
+            
+            # Tạo proxy URL với port cụ thể
+            proxy_url = f"https://{user_pass}@{country}:{port}"
+            return proxy_url
         except Exception as e:
             print(f"Error getting ProtonVPN proxy: {e}")
             return None

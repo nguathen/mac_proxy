@@ -19,6 +19,12 @@ from nordvpn_api import NordVPNAPI
 from protonvpn_api import ProtonVPNAPI
 from proxy_api import proxy_api
 
+# Import protonvpn_service để lấy credentials
+try:
+    from protonvpn_service import Instance as ProtonVpnServiceInstance
+except ImportError:
+    ProtonVpnServiceInstance = None
+
 # Import handlers
 from nordvpn_handler import register_nordvpn_routes
 from protonvpn_handler import register_protonvpn_routes
@@ -331,6 +337,32 @@ def api_status():
                 'running': False,
                 'pid': None
             }
+        }), 500
+
+@app.route('/api/protonvpn/credentials')
+def api_protonvpn_credentials():
+    """API endpoint để lấy ProtonVPN credentials từ protonvpn_service"""
+    try:
+        if not ProtonVpnServiceInstance:
+            return jsonify({
+                'success': False,
+                'error': 'protonvpn_service not available'
+            }), 500
+        
+        username = ProtonVpnServiceInstance.user_name
+        password = ProtonVpnServiceInstance.password
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'password': password,
+            'has_username': bool(username),
+            'has_password': bool(password)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 @app.route('/api/test/proxy/<port>')
