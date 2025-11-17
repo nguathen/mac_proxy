@@ -43,6 +43,26 @@ detect_os() {
     log_info "Detected OS: $OS $OS_VERSION"
 }
 
+# Update system packages
+update_system() {
+    log_info "Updating system packages..."
+    
+    if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
+        ${SUDO_CMD} apt-get update -qq
+        ${SUDO_CMD} apt-get upgrade -y -qq
+        log_success "System packages updated"
+    elif [ "$OS" = "centos" ] || [ "$OS" = "rhel" ] || [ "$OS" = "fedora" ]; then
+        if [ "$OS" = "fedora" ]; then
+            ${SUDO_CMD} dnf update -y -q
+        else
+            ${SUDO_CMD} yum update -y -q
+        fi
+        log_success "System packages updated"
+    else
+        log_warning "System update not supported for $OS, skipping..."
+    fi
+}
+
 # Install dependencies based on OS
 install_dependencies() {
     log_info "Installing system dependencies..."
@@ -134,10 +154,10 @@ install_gost() {
     
     log_info "Downloading Gost v${GOST_VERSION} (${GOST_ARCH})..."
     
-    # Try multiple URL formats
+    # Try multiple URL formats (correct format is gost_VERSION_linux_ARCH.tar.gz)
     GOST_URLS=(
-        "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
         "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+        "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
         "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.gz"
     )
     
@@ -149,27 +169,70 @@ install_gost() {
         log_info "Trying URL: $GOST_URL"
         if command -v wget &> /dev/null; then
             if wget -q --timeout=10 --spider "$GOST_URL" 2>/dev/null; then
-                wget -q --timeout=30 "$GOST_URL" -O gost.gz && DOWNLOAD_SUCCESS=true && break
+                if wget -q --timeout=30 "$GOST_URL" -O gost.gz; then
+                    if [ -f gost.gz ] && [ -s gost.gz ]; then
+                        DOWNLOAD_SUCCESS=true
+                        log_info "Successfully downloaded from: $GOST_URL"
+                        break
+                    fi
+                fi
             fi
         else
-            if curl -fsSL --connect-timeout 5 --max-time 10 --head "$GOST_URL" 2>/dev/null | head -n 1 | grep -q "200 OK"; then
-                curl -fsSL --connect-timeout 10 --max-time 60 "$GOST_URL" -o gost.gz && DOWNLOAD_SUCCESS=true && break
+            HTTP_RESPONSE=$(curl -fsSL --connect-timeout 5 --max-time 10 --head "$GOST_URL" 2>/dev/null | head -n 1 || echo "")
+            if echo "$HTTP_RESPONSE" | grep -q "200 OK"; then
+                if curl -fsSL --connect-timeout 10 --max-time 60 "$GOST_URL" -o gost.gz; then
+                    if [ -f gost.gz ] && [ -s gost.gz ]; then
+                        DOWNLOAD_SUCCESS=true
+                        log_info "Successfully downloaded from: $GOST_URL"
+                        break
+                    fi
+                fi
             fi
         fi
     done
     
-    # If all URLs failed, try downloading latest release asset directly
+    # If all URLs failed, try downloading latest release asset directly from GitHub API
     if [ "$DOWNLOAD_SUCCESS" = false ]; then
-        log_warning "Standard URLs failed, trying to find release asset..."
-        ASSET_URL=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/ginuerzh/gost/releases/latest" 2>/dev/null | \
-            jq -r ".assets[] | select(.name | contains(\"linux-${GOST_ARCH}\") or contains(\"linux_${GOST_ARCH}\")) | .browser_download_url" 2>/dev/null | head -n 1)
+        log_warning "Standard URLs failed, trying to find release asset from GitHub API..."
+        # Try to find the correct asset name pattern
+        ASSET_PATTERNS=(
+            "gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+            "gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
+            "gost_${GOST_VERSION}_linux_${GOST_ARCH}.gz"
+        )
         
-        if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
-            log_info "Found asset URL: $ASSET_URL"
-            if command -v wget &> /dev/null; then
-                wget -q --timeout=30 "$ASSET_URL" -O gost.gz && DOWNLOAD_SUCCESS=true
-            else
-                curl -fsSL --connect-timeout 10 --max-time 60 "$ASSET_URL" -o gost.gz && DOWNLOAD_SUCCESS=true
+        for PATTERN in "${ASSET_PATTERNS[@]}"; do
+            ASSET_URL=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/ginuerzh/gost/releases/latest" 2>/dev/null | \
+                jq -r ".assets[] | select(.name == \"${PATTERN}\") | .browser_download_url" 2>/dev/null | head -n 1)
+            
+            if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+                log_info "Found asset URL: $ASSET_URL"
+                if command -v wget &> /dev/null; then
+                    if wget -q --timeout=30 "$ASSET_URL" -O gost.gz && [ -f gost.gz ] && [ -s gost.gz ]; then
+                        DOWNLOAD_SUCCESS=true
+                        break
+                    fi
+                else
+                    if curl -fsSL --connect-timeout 10 --max-time 60 "$ASSET_URL" -o gost.gz && [ -f gost.gz ] && [ -s gost.gz ]; then
+                        DOWNLOAD_SUCCESS=true
+                        break
+                    fi
+                fi
+            fi
+        done
+        
+        # If still failed, try to find any linux asset matching architecture
+        if [ "$DOWNLOAD_SUCCESS" = false ]; then
+            ASSET_URL=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/ginuerzh/gost/releases/latest" 2>/dev/null | \
+                jq -r ".assets[] | select(.name | contains(\"linux\") and contains(\"${GOST_ARCH}\")) | .browser_download_url" 2>/dev/null | head -n 1)
+            
+            if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+                log_info "Found matching asset URL: $ASSET_URL"
+                if command -v wget &> /dev/null; then
+                    wget -q --timeout=30 "$ASSET_URL" -O gost.gz && [ -f gost.gz ] && [ -s gost.gz ] && DOWNLOAD_SUCCESS=true
+                else
+                    curl -fsSL --connect-timeout 10 --max-time 60 "$ASSET_URL" -o gost.gz && [ -f gost.gz ] && [ -s gost.gz ] && DOWNLOAD_SUCCESS=true
+                fi
             fi
         fi
     fi
@@ -199,33 +262,95 @@ install_gost() {
     fi
     
     # Extract based on file type
-    if file gost.gz 2>/dev/null | grep -qi "gzip"; then
+    log_info "Extracting Gost binary..."
+    FILE_TYPE=$(file gost.gz 2>/dev/null || echo "")
+    log_info "File type: $FILE_TYPE"
+    
+    if echo "$FILE_TYPE" | grep -qi "gzip.*compressed"; then
+        log_info "Detected gzip compressed file"
+        # Gunzip will create file with name without .gz extension
         gunzip -f gost.gz
-    elif file gost.gz 2>/dev/null | grep -qi "tar"; then
-        tar -xzf gost.gz
-        # Find gost binary in extracted files
-        if [ -f "gost" ]; then
-            mv gost gost_binary
+        # After gunzip, file might be named gost-linux-amd64-2.12.0 or just gost
+        if [ -f "gost-linux-${GOST_ARCH}-${GOST_VERSION}" ]; then
+            mv "gost-linux-${GOST_ARCH}-${GOST_VERSION}" gost
+            log_info "Renamed gost-linux-${GOST_ARCH}-${GOST_VERSION} to gost"
         elif [ -f "gost-linux-${GOST_ARCH}" ]; then
-            mv "gost-linux-${GOST_ARCH}" gost_binary
+            mv "gost-linux-${GOST_ARCH}" gost
+            log_info "Renamed gost-linux-${GOST_ARCH} to gost"
+        elif [ ! -f gost ]; then
+            log_error "Failed to gunzip file or find extracted binary"
+            log_info "Files in /tmp after gunzip:"
+            ls -la /tmp/gost* 2>/dev/null || true
+            exit 1
+        fi
+    elif echo "$FILE_TYPE" | grep -qi "tar archive\|POSIX tar"; then
+        log_info "Detected tar archive"
+        # Extract tar.gz file
+        tar -xzf gost.gz
+        # Find gost binary in extracted files (usually in a subdirectory like gost_2.12.0_linux_amd64/)
+        if [ -f "gost" ]; then
+            log_info "Found gost binary in root"
+        elif [ -d "gost_${GOST_VERSION}_linux_${GOST_ARCH}" ] && [ -f "gost_${GOST_VERSION}_linux_${GOST_ARCH}/gost" ]; then
+            mv "gost_${GOST_VERSION}_linux_${GOST_ARCH}/gost" gost
+            log_info "Found gost in subdirectory gost_${GOST_VERSION}_linux_${GOST_ARCH}/"
+        elif [ -f "gost-linux-${GOST_ARCH}-${GOST_VERSION}" ]; then
+            mv "gost-linux-${GOST_ARCH}-${GOST_VERSION}" gost
+            log_info "Found gost-linux-${GOST_ARCH}-${GOST_VERSION}"
         else
-            find . -name "gost" -type f -executable | head -n 1 | xargs -I {} mv {} gost_binary 2>/dev/null || true
+            # Search for gost binary in current directory and subdirectories
+            FOUND_GOST=$(find . -maxdepth 3 -name "gost" -type f ! -name "*.gz" ! -name "*.tar" 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_GOST" ] && [ "$FOUND_GOST" != "./gost" ]; then
+                mv "$FOUND_GOST" gost
+                log_info "Found gost at: $FOUND_GOST"
+            else
+                # Try to find any executable file that's not a script
+                FOUND_BIN=$(find . -maxdepth 3 -type f -executable ! -name "*.sh" ! -name "*.py" ! -name "*.gz" ! -name "*.tar" 2>/dev/null | head -n 1)
+                if [ -n "$FOUND_BIN" ] && [ "$FOUND_BIN" != "./gost" ]; then
+                    mv "$FOUND_BIN" gost
+                    log_info "Found binary at: $FOUND_BIN"
+                fi
+            fi
         fi
-        if [ -f "gost_binary" ]; then
-            mv gost_binary gost
-        fi
-    else
-        # Try to use as-is
+    elif echo "$FILE_TYPE" | grep -qi "executable\|ELF"; then
+        log_info "File appears to be executable already"
         mv gost.gz gost
-        chmod +x gost
+    else
+        log_info "Unknown file type, trying to extract..."
+        # Try gunzip first
+        if gunzip -f gost.gz 2>/dev/null; then
+            log_info "Successfully extracted with gunzip"
+        elif tar -xzf gost.gz 2>/dev/null; then
+            log_info "Successfully extracted with tar"
+            # Find the binary
+            FOUND_GOST=$(find . -maxdepth 3 -name "gost" -type f 2>/dev/null | head -n 1)
+            if [ -n "$FOUND_GOST" ] && [ "$FOUND_GOST" != "./gost" ]; then
+                mv "$FOUND_GOST" gost
+            fi
+        else
+            # Last resort: try to use as-is
+            log_warning "Could not extract, trying to use file as-is"
+            mv gost.gz gost
+        fi
     fi
     
-    if [ ! -f gost ] || [ ! -x gost ]; then
+    # Verify we have the binary
+    if [ ! -f gost ]; then
         log_error "Failed to extract Gost binary"
+        log_info "File type was: $FILE_TYPE"
+        log_info "Contents of /tmp:"
+        ls -la /tmp/gost* 2>/dev/null || true
         exit 1
     fi
     
+    # Make sure it's executable
     chmod +x gost
+    
+    # Verify it's actually a binary
+    BINARY_TYPE=$(file gost 2>/dev/null || echo "")
+    log_info "Extracted binary type: $BINARY_TYPE"
+    if ! echo "$BINARY_TYPE" | grep -qi "executable\|ELF"; then
+        log_warning "File may not be a valid binary, but continuing..."
+    fi
     ${SUDO_CMD} mv gost /usr/local/bin/gost
     
     # Verify installation
@@ -761,6 +886,7 @@ main() {
     fi
     
     detect_os
+    update_system
     install_dependencies
     install_gost
     install_warp
