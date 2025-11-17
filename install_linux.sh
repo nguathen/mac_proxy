@@ -160,6 +160,183 @@ install_gost() {
     fi
 }
 
+# Install Cloudflare WARP
+install_warp() {
+    log_info "Installing Cloudflare WARP..."
+    
+    if command -v warp-cli &> /dev/null; then
+        log_warning "WARP CLI already installed: $(command -v warp-cli)"
+        log_info "Checking WARP configuration..."
+        
+        # Check if already configured
+        if warp-cli status &>/dev/null && \
+           warp-cli settings | grep -q "mode: proxy" 2>/dev/null && \
+           warp-cli settings | grep -q "proxy_port: 8111" 2>/dev/null; then
+            log_success "WARP already configured (proxy mode, port 8111)"
+            return
+        fi
+    else
+        log_info "Installing Cloudflare WARP CLI..."
+        
+        if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
+            # Install WARP from Cloudflare repository (recommended method)
+            log_info "Adding Cloudflare WARP repository..."
+            
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "x86_64" ]; then
+                WARP_ARCH="amd64"
+            elif [ "$ARCH" = "aarch64" ]; then
+                WARP_ARCH="arm64"
+            else
+                log_error "Unsupported architecture for WARP: $ARCH"
+                return
+            fi
+            
+            # Install GPG key
+            curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg 2>/dev/null || {
+                log_warning "Failed to add GPG key, trying alternative method..."
+                curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo apt-key add - 2>/dev/null || true
+            }
+            
+            # Detect Ubuntu/Debian codename
+            if command -v lsb_release &> /dev/null; then
+                CODENAME=$(lsb_release -cs)
+            elif [ -f /etc/os-release ]; then
+                CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)
+                if [ -z "$CODENAME" ]; then
+                    # Fallback for older systems
+                    CODENAME=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"' | cut -d. -f1)
+                    case "$CODENAME" in
+                        20) CODENAME="focal" ;;
+                        22) CODENAME="jammy" ;;
+                        24) CODENAME="noble" ;;
+                        *) CODENAME="jammy" ;; # Default fallback
+                    esac
+                fi
+            else
+                CODENAME="jammy" # Default fallback
+            fi
+            
+            # Add repository
+            echo "deb [arch=${WARP_ARCH} signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list > /dev/null
+            
+            # Update and install
+            sudo apt-get update -qq
+            sudo apt-get install -y cloudflare-warp
+            
+        elif [ "$OS" = "centos" ] || [ "$OS" = "rhel" ] || [ "$OS" = "fedora" ]; then
+            log_info "Installing WARP from Cloudflare repository..."
+            
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "x86_64" ]; then
+                WARP_ARCH="x86_64"
+            elif [ "$ARCH" = "aarch64" ]; then
+                WARP_ARCH="aarch64"
+            else
+                log_error "Unsupported architecture for WARP: $ARCH"
+                return
+            fi
+            
+            if [ "$OS" = "fedora" ]; then
+                sudo dnf install -y 'https://pkg.cloudflareclient.com/packages/fedora/cloudflare-warp-2024.12.0-1.${WARP_ARCH}.rpm' || \
+                (curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
+                 echo -e "[cloudflare-client]\nname=Cloudflare Client\nbaseurl=https://pkg.cloudflareclient.com/packages/fedora\nenabled=1\ngpgcheck=1\ngpgkey=file:///usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" | sudo tee /etc/yum.repos.d/cloudflare-warp.repo && \
+                 sudo dnf install -y cloudflare-warp)
+            else
+                sudo yum install -y 'https://pkg.cloudflareclient.com/packages/el8/cloudflare-warp-2024.12.0-1.${WARP_ARCH}.rpm' || \
+                (curl https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg && \
+                 echo -e "[cloudflare-client]\nname=Cloudflare Client\nbaseurl=https://pkg.cloudflareclient.com/packages/el8\nenabled=1\ngpgcheck=1\ngpgkey=file:///usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" | sudo tee /etc/yum.repos.d/cloudflare-warp.repo && \
+                 sudo yum install -y cloudflare-warp)
+            fi
+        else
+            log_warning "WARP installation not supported for $OS. Please install manually from https://1.1.1.1/"
+            return
+        fi
+        
+        # Verify installation
+        if ! command -v warp-cli &> /dev/null; then
+            log_error "Failed to install WARP CLI"
+            log_info "Please install manually from: https://1.1.1.1/"
+            return
+        fi
+        
+        log_success "WARP CLI installed"
+    fi
+    
+    # Configure WARP
+    log_info "Configuring Cloudflare WARP..."
+    
+    # Wait for WARP daemon to be ready (may take a few seconds after installation)
+    log_info "Waiting for WARP daemon to be ready..."
+    WAIT_COUNT=0
+    MAX_WAIT=30
+    while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+        if warp-cli status &>/dev/null; then
+            break
+        fi
+        sleep 1
+        WAIT_COUNT=$((WAIT_COUNT + 1))
+    done
+    
+    if [ $WAIT_COUNT -ge $MAX_WAIT ]; then
+        log_warning "WARP daemon may not be ready. Continuing anyway..."
+    fi
+    
+    # Register if needed
+    log_info "Checking WARP registration..."
+    ACCOUNT_STATUS=$(warp-cli account 2>&1 || echo "")
+    if echo "$ACCOUNT_STATUS" | grep -qi "missing\|not registered\|register\|No account"; then
+        log_info "Registering WARP..."
+        warp-cli register 2>&1 | grep -v "Success" || true
+        sleep 2
+    else
+        log_info "WARP already registered"
+    fi
+    
+    # Set proxy mode
+    log_info "Setting WARP to proxy mode..."
+    CURRENT_MODE=$(warp-cli settings 2>/dev/null | grep -i "mode:" | awk '{print $2}' || echo "")
+    if [ "$CURRENT_MODE" != "proxy" ]; then
+        warp-cli set-mode proxy 2>&1 | grep -v "Success" || true
+        sleep 2
+    else
+        log_info "WARP already in proxy mode"
+    fi
+    
+    # Set proxy port to 8111
+    log_info "Setting WARP proxy port to 8111..."
+    CURRENT_PORT=$(warp-cli settings 2>/dev/null | grep -i "proxy_port:" | awk '{print $2}' || echo "")
+    if [ "$CURRENT_PORT" != "8111" ]; then
+        warp-cli set-proxy-port 8111 2>&1 | grep -v "Success" || true
+        sleep 1
+    else
+        log_info "WARP proxy port already set to 8111"
+    fi
+    
+    # Connect WARP
+    log_info "Connecting WARP..."
+    CURRENT_STATUS=$(warp-cli status 2>/dev/null | grep -i "status" | awk '{print $2}' || echo "")
+    if echo "$CURRENT_STATUS" | grep -qi "disconnected"; then
+        warp-cli connect 2>&1 | grep -v "Success" || true
+        sleep 3
+    else
+        log_info "WARP already connected"
+    fi
+    
+    # Verify connection
+    if warp-cli status 2>/dev/null | grep -qi "connected"; then
+        # Test proxy port
+        if nc -z 127.0.0.1 8111 2>/dev/null; then
+            log_success "WARP configured and connected (proxy mode, port 8111)"
+        else
+            log_warning "WARP connected but proxy port 8111 not ready yet"
+        fi
+    else
+        log_warning "WARP may not be connected yet. It will be checked when services start."
+        log_info "You can manually connect with: warp-cli connect"
+    fi
+}
+
 # Clone repository
 clone_repo() {
     log_info "Cloning repository..."
@@ -498,6 +675,7 @@ main() {
     detect_os
     install_dependencies
     install_gost
+    install_warp
     clone_repo
     install_python_deps
     make_executable
