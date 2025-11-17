@@ -22,7 +22,25 @@ except ImportError:
     ProtonVpnServiceInstance = None
 
 class AutoCredentialUpdater:
-    def __init__(self, base_dir: str = "/Volumes/Ssd/Projects/mac_proxy"):
+    def __init__(self, base_dir: str = None):
+        # Auto-detect base directory if not provided
+        if base_dir is None:
+            # Get directory of this script
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            # If script is in root, use script_dir; otherwise use parent
+            if os.path.basename(script_dir) == 'mac_proxy' or os.path.exists(os.path.join(script_dir, 'manage_gost.sh')):
+                base_dir = script_dir
+            else:
+                # Try to find mac_proxy directory
+                current = script_dir
+                while current != os.path.dirname(current):
+                    if os.path.exists(os.path.join(current, 'manage_gost.sh')):
+                        base_dir = current
+                        break
+                    current = os.path.dirname(current)
+                if base_dir is None:
+                    # Fallback: use script directory or home directory
+                    base_dir = script_dir if os.path.exists(os.path.join(script_dir, 'manage_gost.sh')) else os.path.expanduser("~/mac_proxy")
         self.base_dir = base_dir
         self.log_dir = os.path.join(base_dir, "logs")
         self.config_dir = os.path.join(base_dir, "config")

@@ -295,10 +295,28 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
             # Get ProtonVPN auth using dedicated script
             import subprocess
             try:
+                # Auto-detect base directory
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                base_dir = os.path.dirname(script_dir)  # webui -> parent
+                
+                # Verify this is the right directory
+                if not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
+                    # Try to find mac_proxy directory
+                    current = base_dir
+                    while current != os.path.dirname(current):
+                        if os.path.exists(os.path.join(current, 'get_protonvpn_auth.sh')):
+                            base_dir = current
+                            break
+                        current = os.path.dirname(current)
+                    # Fallback to home directory
+                    if not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
+                        base_dir = os.path.expanduser("~/mac_proxy")
+                
                 # Call get_protonvpn_auth.sh script
-                result = subprocess.run(['./get_protonvpn_auth.sh'], 
+                auth_script = os.path.join(base_dir, 'get_protonvpn_auth.sh')
+                result = subprocess.run(['bash', auth_script], 
                                       capture_output=True, text=True, timeout=10, 
-                                      cwd='/Volumes/Ssd/Projects/mac_proxy')
+                                      cwd=base_dir)
                 if result.returncode == 0 and result.stdout.strip():
                     auth_token = result.stdout.strip()
                     proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
