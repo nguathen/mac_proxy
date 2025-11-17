@@ -341,14 +341,41 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                     }), 500
                 
                 # Call get_protonvpn_auth.sh script
+                # Ensure we're in the base_dir when running the script
                 result = subprocess.run(['bash', auth_script], 
                                       capture_output=True, text=True, timeout=10, 
-                                      cwd=base_dir)
+                                      cwd=base_dir,
+                                      env={**os.environ, 'PYTHONPATH': base_dir})
+                
+                # Check for errors in stderr first
+                if result.stderr and result.stderr.strip():
+                    error_msg = result.stderr.strip()
+                    # Filter out common Python warnings
+                    if 'Error:' in error_msg or 'Traceback' in error_msg or 'FileNotFoundError' in error_msg:
+                        # Extract the actual error
+                        if '/Volumes/Ssd/Projects/mac_proxy' in error_msg:
+                            return jsonify({
+                                'success': False,
+                                'error': f'Path error detected. Base directory: {base_dir}. Please restart Web UI after updating code.'
+                            }), 500
+                        return jsonify({
+                            'success': False,
+                            'error': f'Failed to get ProtonVPN auth: {error_msg}'
+                        }), 500
+                
                 if result.returncode == 0 and result.stdout.strip():
                     auth_token = result.stdout.strip()
-                    proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
+                    # Remove any error messages that might have been printed to stdout
+                    auth_token = auth_token.split('\n')[0].strip()
+                    if auth_token and not auth_token.startswith('Error:'):
+                        proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': f'Failed to get ProtonVPN auth token. Output: {result.stdout[:200]}'
+                        }), 500
                 else:
-                    error_msg = result.stderr.strip() if result.stderr else 'Unknown error'
+                    error_msg = result.stderr.strip() if result.stderr else (result.stdout.strip() if result.stdout else 'Unknown error')
                     return jsonify({
                         'success': False,
                         'error': f'Failed to get ProtonVPN auth token: {error_msg}'

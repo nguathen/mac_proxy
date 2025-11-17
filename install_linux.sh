@@ -348,16 +348,57 @@ install_gost() {
     # Verify it's actually a binary
     BINARY_TYPE=$(file gost 2>/dev/null || echo "")
     log_info "Extracted binary type: $BINARY_TYPE"
+    
+    # Check if it's a valid ELF binary
     if ! echo "$BINARY_TYPE" | grep -qi "executable\|ELF"; then
-        log_warning "File may not be a valid binary, but continuing..."
+        log_error "File is not a valid binary executable!"
+        log_info "File type: $BINARY_TYPE"
+        log_info "This might be a tar archive or corrupted file."
+        log_info "Trying to extract again..."
+        
+        # If it's a tar file, try extracting again
+        if echo "$BINARY_TYPE" | grep -qi "tar\|archive"; then
+            log_info "Detected tar archive, extracting..."
+            if [ -f gost.gz ]; then
+                tar -xzf gost.gz
+                FOUND_GOST=$(find . -maxdepth 3 -name "gost" -type f ! -name "*.gz" ! -name "*.tar" 2>/dev/null | head -n 1)
+                if [ -n "$FOUND_GOST" ] && [ -f "$FOUND_GOST" ]; then
+                    rm -f gost
+                    cp "$FOUND_GOST" gost
+                    chmod +x gost
+                    BINARY_TYPE=$(file gost 2>/dev/null || echo "")
+                    log_info "Re-extracted binary type: $BINARY_TYPE"
+                fi
+            fi
+        fi
+        
+        # Final check
+        if ! echo "$BINARY_TYPE" | grep -qi "executable\|ELF"; then
+            log_error "Still not a valid binary after re-extraction"
+            log_error "Please install Gost manually or run: ./reinstall_gost.sh"
+            exit 1
+        fi
     fi
+    
+    # Test the binary before installing
+    log_info "Testing binary before installation..."
+    if ! ./gost -V &> /dev/null && ! ./gost --version &> /dev/null; then
+        log_warning "Binary test failed, but it might still work"
+    else
+        VERSION=$(./gost -V 2>&1 || ./gost --version 2>&1 || echo "unknown")
+        log_info "Binary test passed: $VERSION"
+    fi
+    
     ${SUDO_CMD} mv gost /usr/local/bin/gost
+    ${SUDO_CMD} chmod +x /usr/local/bin/gost
     
     # Verify installation
-    if gost -V &> /dev/null; then
-        log_success "Gost installed: $(gost -V)"
+    if gost -V &> /dev/null || gost --version &> /dev/null; then
+        VERSION=$(gost -V 2>&1 || gost --version 2>&1 || echo "unknown")
+        log_success "Gost installed: $VERSION"
     else
         log_success "Gost installed to /usr/local/bin/gost"
+        log_warning "Could not verify version, but binary is installed"
     fi
 }
 

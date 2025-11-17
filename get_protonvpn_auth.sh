@@ -8,21 +8,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Function để lấy auth password từ protonvpn_service
 get_protonvpn_auth() {
     # Sử dụng Python để lấy password từ protonvpn_service.Instance.password
-    local password=$(python3 -c "
+    # Ensure we're in the right directory and can import the module
+    local password=$(cd "$SCRIPT_DIR" && python3 -c "
 import sys
 import os
-sys.path.insert(0, '$SCRIPT_DIR')
+
+# Add script directory to path
+script_dir = '$SCRIPT_DIR'
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
 try:
     from protonvpn_service import Instance
-    if Instance.password:
+    if Instance and hasattr(Instance, 'password') and Instance.password:
         print(Instance.password)
     else:
         print('', end='')
 except Exception as e:
+    # Print error to stderr for debugging
+    import sys
+    print(f'Error: {e}', file=sys.stderr)
     print('', end='')
-" 2>/dev/null)
+" 2>&1)
     
-    if [ -n "$password" ]; then
+    # Extract password (everything before any error messages)
+    password=$(echo "$password" | grep -v "^Error:" | head -n 1)
+    
+    if [ -n "$password" ] && [ "$password" != "" ]; then
         echo "$password"
         return 0
     else
