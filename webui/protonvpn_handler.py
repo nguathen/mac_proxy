@@ -295,25 +295,52 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
             # Get ProtonVPN auth using dedicated script
             import subprocess
             try:
-                # Auto-detect base directory
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                base_dir = os.path.dirname(script_dir)  # webui -> parent
+                # Auto-detect base directory - use BASE_DIR from app.py if available
+                # Otherwise detect from current file location
+                try:
+                    # Try to get BASE_DIR from app module
+                    import webui.app as app_module
+                    base_dir = getattr(app_module, 'BASE_DIR', None)
+                except:
+                    base_dir = None
+                
+                if not base_dir:
+                    # Auto-detect base directory from current file
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    base_dir = os.path.dirname(script_dir)  # webui -> parent
                 
                 # Verify this is the right directory
-                if not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
+                if not os.path.exists(base_dir) or not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
                     # Try to find mac_proxy directory
                     current = base_dir
+                    found = False
                     while current != os.path.dirname(current):
                         if os.path.exists(os.path.join(current, 'get_protonvpn_auth.sh')):
                             base_dir = current
+                            found = True
                             break
                         current = os.path.dirname(current)
+                    
                     # Fallback to home directory
-                    if not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
+                    if not found:
                         base_dir = os.path.expanduser("~/mac_proxy")
                 
-                # Call get_protonvpn_auth.sh script
+                # Verify base_dir exists
+                if not os.path.exists(base_dir):
+                    return jsonify({
+                        'success': False,
+                        'error': f'Base directory does not exist: {base_dir}. Please ensure mac_proxy is installed correctly.'
+                    }), 500
+                
+                # Verify auth script exists
                 auth_script = os.path.join(base_dir, 'get_protonvpn_auth.sh')
+                if not os.path.exists(auth_script):
+                    return jsonify({
+                        'success': False,
+                        'error': f'Auth script not found: {auth_script}. Please ensure mac_proxy is installed correctly.'
+                    }), 500
+                
+                # Call get_protonvpn_auth.sh script
                 result = subprocess.run(['bash', auth_script], 
                                       capture_output=True, text=True, timeout=10, 
                                       cwd=base_dir)
@@ -321,14 +348,23 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                     auth_token = result.stdout.strip()
                     proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
                 else:
+                    error_msg = result.stderr.strip() if result.stderr else 'Unknown error'
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to get ProtonVPN auth token: {result.stderr}'
+                        'error': f'Failed to get ProtonVPN auth token: {error_msg}'
                     }), 500
-            except Exception as e:
+            except FileNotFoundError as e:
                 return jsonify({
                     'success': False,
-                    'error': f'Failed to get ProtonVPN auth: {str(e)}'
+                    'error': f'File not found: {str(e)}. Please ensure mac_proxy is installed correctly.'
+                }), 500
+            except Exception as e:
+                import traceback
+                error_detail = traceback.format_exc()
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to get ProtonVPN auth: {str(e)}',
+                    'detail': error_detail if 'DEBUG' in os.environ else None
                 }), 500
             
             # Save gost config
