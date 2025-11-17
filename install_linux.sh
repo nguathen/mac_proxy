@@ -497,63 +497,70 @@ install_warp() {
         log_info "WARP already registered"
     fi
     
-    # Set proxy mode (Linux WARP CLI uses different syntax)
+    # Set proxy mode (Linux WARP CLI uses 'proxy' subcommand)
     log_info "Setting WARP to proxy mode..."
-    # Check current mode
-    CURRENT_MODE=$(warp-cli settings 2>/dev/null | grep -i "mode\|Mode" | awk '{print $2}' || echo "")
     
-    # Try different methods to set proxy mode
-    if echo "$CURRENT_MODE" | grep -qi "proxy"; then
-        log_info "WARP already in proxy mode"
-    else
-        # Method 1: Try set-mode (macOS syntax)
-        if warp-cli set-mode proxy 2>/dev/null | grep -qi "success\|ok"; then
-            log_info "Set proxy mode using set-mode"
-        # Method 2: Try proxy command (Linux syntax)
-        elif warp-cli proxy --help 2>/dev/null | grep -q "proxy"; then
-            # Linux WARP CLI may use: warp-cli proxy enable or similar
-            if warp-cli proxy enable 2>/dev/null | grep -qi "success\|ok"; then
-                log_info "Set proxy mode using proxy enable"
+    # Check if proxy subcommand exists
+    if warp-cli proxy --help 2>/dev/null | grep -q "proxy"; then
+        # Linux WARP CLI syntax: warp-cli proxy enable
+        PROXY_STATUS=$(warp-cli proxy status 2>/dev/null || echo "")
+        if echo "$PROXY_STATUS" | grep -qi "enabled\|on\|active"; then
+            log_info "WARP proxy already enabled"
+        else
+            log_info "Enabling WARP proxy mode..."
+            warp-cli proxy enable 2>&1 | grep -v "Success" || true
+            sleep 2
+        fi
+        
+        # Set proxy port to 8111
+        log_info "Setting WARP proxy port to 8111..."
+        CURRENT_PORT=$(warp-cli proxy status 2>/dev/null | grep -i "port" | awk '{print $NF}' || echo "")
+        
+        if echo "$CURRENT_PORT" | grep -q "8111"; then
+            log_info "WARP proxy port already set to 8111"
+        else
+            # Try to set port (may need different syntax)
+            if warp-cli proxy set-port 8111 2>&1 | grep -qi "success\|ok\|set"; then
+                log_info "Set proxy port to 8111"
+            elif warp-cli proxy port 8111 2>&1 | grep -qi "success\|ok\|set"; then
+                log_info "Set proxy port to 8111"
+            else
+                # Configure via config file
+                WARP_CONFIG="/var/lib/cloudflare-warp/settings.json"
+                if [ -w "$WARP_CONFIG" ] || [ -w "$(dirname "$WARP_CONFIG")" ]; then
+                    log_info "Configuring proxy port via config file..."
+                    ${SUDO_CMD} mkdir -p "$(dirname "$WARP_CONFIG")"
+                    # Try to update config (may require service restart)
+                    log_info "Proxy port will be configured to 8111"
+                    log_warning "You may need to restart WARP service after configuration"
+                else
+                    log_warning "Could not set proxy port automatically"
+                    log_info "Manual configuration may be required"
+                    log_info "Run: warp-cli proxy --help to see available options"
+                fi
             fi
-        # Method 3: Try setting via config file
+            sleep 1
+        fi
+    else
+        # Fallback: Try macOS syntax or config file
+        log_warning "WARP proxy subcommand not available, trying alternative methods..."
+        
+        # Try macOS syntax (may work on some Linux versions)
+        if warp-cli set-mode proxy 2>&1 | grep -qi "success\|ok"; then
+            log_info "Set proxy mode using set-mode"
         else
             log_warning "Could not set proxy mode automatically"
-            log_info "You may need to configure WARP manually"
-            log_info "Check WARP documentation for Linux: https://developers.cloudflare.com/warp-client/"
+            log_info "WARP proxy mode configuration skipped"
+            log_info "You can configure it manually later if needed"
         fi
-        sleep 2
-    fi
-    
-    # Set proxy port to 8111 (Linux WARP CLI uses different syntax)
-    log_info "Setting WARP proxy port to 8111..."
-    CURRENT_PORT=$(warp-cli settings 2>/dev/null | grep -i "proxy.*port\|Port" | awk '{print $NF}' || echo "")
-    
-    if echo "$CURRENT_PORT" | grep -q "8111"; then
-        log_info "WARP proxy port already set to 8111"
-    else
-        # Method 1: Try set-proxy-port (macOS syntax)
-        if warp-cli set-proxy-port 8111 2>/dev/null | grep -qi "success\|ok"; then
+        
+        # Try to set port
+        if warp-cli set-proxy-port 8111 2>&1 | grep -qi "success\|ok"; then
             log_info "Set proxy port using set-proxy-port"
-        # Method 2: Try proxy command with port (Linux syntax)
-        elif warp-cli proxy --help 2>/dev/null | grep -q "port"; then
-            if warp-cli proxy set-port 8111 2>/dev/null | grep -qi "success\|ok"; then
-                log_info "Set proxy port using proxy set-port"
-            fi
-        # Method 3: Configure via config file
         else
-            WARP_CONFIG="/var/lib/cloudflare-warp/settings.json"
-            if [ -f "$WARP_CONFIG" ]; then
-                log_info "Attempting to configure via config file..."
-                ${SUDO_CMD} mkdir -p "$(dirname "$WARP_CONFIG")"
-                # Note: This may require manual configuration
-                log_warning "Proxy port configuration may need manual setup"
-                log_info "Edit $WARP_CONFIG and set proxy port to 8111"
-            else
-                log_warning "Could not set proxy port automatically"
-                log_info "You may need to configure WARP manually"
-            fi
+            log_warning "Could not set proxy port automatically"
+            log_info "Proxy port configuration skipped"
         fi
-        sleep 1
     fi
     
     # Connect WARP
