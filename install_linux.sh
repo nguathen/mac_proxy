@@ -122,35 +122,111 @@ install_gost() {
             ;;
     esac
     
-    # Get latest version
+    # Get latest version from GitHub releases
+    log_info "Checking latest Gost version..."
     GOST_VERSION=$(curl -s --connect-timeout 5 --max-time 10 https://api.github.com/repos/ginuerzh/gost/releases/latest 2>/dev/null | jq -r '.tag_name' 2>/dev/null | sed 's/v//' || echo "")
     
     if [ -z "$GOST_VERSION" ] || [ "$GOST_VERSION" = "null" ] || [ "$GOST_VERSION" = "" ]; then
-        GOST_VERSION="3.0.0-rc8"  # Fallback version
+        # Try to get a known working version
+        GOST_VERSION="3.0.0-rc8"
         log_warning "Using fallback Gost version: $GOST_VERSION"
     fi
     
     log_info "Downloading Gost v${GOST_VERSION} (${GOST_ARCH})..."
     
-    GOST_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
+    # Try multiple URL formats
+    GOST_URLS=(
+        "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${GOST_ARCH}-${GOST_VERSION}.gz"
+        "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.tar.gz"
+        "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${GOST_ARCH}.gz"
+    )
     
     # Download and install
     cd /tmp
-    if command -v wget &> /dev/null; then
-        wget -q --timeout=10 "$GOST_URL" -O gost.gz || curl -fsSL --connect-timeout 10 --max-time 30 "$GOST_URL" -o gost.gz
-    else
-        curl -fsSL --connect-timeout 10 --max-time 30 "$GOST_URL" -o gost.gz
+    DOWNLOAD_SUCCESS=false
+    
+    for GOST_URL in "${GOST_URLS[@]}"; do
+        log_info "Trying URL: $GOST_URL"
+        if command -v wget &> /dev/null; then
+            if wget -q --timeout=10 --spider "$GOST_URL" 2>/dev/null; then
+                wget -q --timeout=30 "$GOST_URL" -O gost.gz && DOWNLOAD_SUCCESS=true && break
+            fi
+        else
+            if curl -fsSL --connect-timeout 5 --max-time 10 --head "$GOST_URL" 2>/dev/null | head -n 1 | grep -q "200 OK"; then
+                curl -fsSL --connect-timeout 10 --max-time 60 "$GOST_URL" -o gost.gz && DOWNLOAD_SUCCESS=true && break
+            fi
+        fi
+    done
+    
+    # If all URLs failed, try downloading latest release asset directly
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then
+        log_warning "Standard URLs failed, trying to find release asset..."
+        ASSET_URL=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/ginuerzh/gost/releases/latest" 2>/dev/null | \
+            jq -r ".assets[] | select(.name | contains(\"linux-${GOST_ARCH}\") or contains(\"linux_${GOST_ARCH}\")) | .browser_download_url" 2>/dev/null | head -n 1)
+        
+        if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+            log_info "Found asset URL: $ASSET_URL"
+            if command -v wget &> /dev/null; then
+                wget -q --timeout=30 "$ASSET_URL" -O gost.gz && DOWNLOAD_SUCCESS=true
+            else
+                curl -fsSL --connect-timeout 10 --max-time 60 "$ASSET_URL" -o gost.gz && DOWNLOAD_SUCCESS=true
+            fi
+        fi
     fi
     
-    if [ ! -f gost.gz ]; then
-        log_error "Failed to download Gost from $GOST_URL"
-        log_error "Please check your internet connection and try again"
+    if [ "$DOWNLOAD_SUCCESS" = false ] || [ ! -f gost.gz ]; then
+        log_error "Failed to download Gost from GitHub releases"
+        log_info "Trying alternative installation method..."
+        
+        # Alternative: Install from Go (if available) or use package manager
+        if command -v go &> /dev/null; then
+            log_info "Installing Gost using Go..."
+            go install github.com/ginuerzh/gost/cmd/gost@latest
+            if command -v gost &> /dev/null || [ -f "$HOME/go/bin/gost" ]; then
+                if [ -f "$HOME/go/bin/gost" ]; then
+                    sudo cp "$HOME/go/bin/gost" /usr/local/bin/gost
+                    sudo chmod +x /usr/local/bin/gost
+                fi
+                log_success "Gost installed via Go"
+                return
+            fi
+        fi
+        
+        log_error "Please install Gost manually:"
+        log_info "  Option 1: Download from https://github.com/ginuerzh/gost/releases"
+        log_info "  Option 2: Install Go and run: go install github.com/ginuerzh/gost/cmd/gost@latest"
         exit 1
     fi
     
-    gunzip -f gost.gz
+    # Extract based on file type
+    if file gost.gz 2>/dev/null | grep -qi "gzip"; then
+        gunzip -f gost.gz
+    elif file gost.gz 2>/dev/null | grep -qi "tar"; then
+        tar -xzf gost.gz
+        # Find gost binary in extracted files
+        if [ -f "gost" ]; then
+            mv gost gost_binary
+        elif [ -f "gost-linux-${GOST_ARCH}" ]; then
+            mv "gost-linux-${GOST_ARCH}" gost_binary
+        else
+            find . -name "gost" -type f -executable | head -n 1 | xargs -I {} mv {} gost_binary 2>/dev/null || true
+        fi
+        if [ -f "gost_binary" ]; then
+            mv gost_binary gost
+        fi
+    else
+        # Try to use as-is
+        mv gost.gz gost
+        chmod +x gost
+    fi
+    
+    if [ ! -f gost ] || [ ! -x gost ]; then
+        log_error "Failed to extract Gost binary"
+        exit 1
+    fi
+    
     chmod +x gost
-    sudo mv gost /usr/local/bin/gost
+    ${SUDO_CMD} mv gost /usr/local/bin/gost
     
     # Verify installation
     if gost -V &> /dev/null; then
