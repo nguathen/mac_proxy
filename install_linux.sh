@@ -661,35 +661,25 @@ main() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     
-    # Check if running as root
-    # Use multiple methods to detect root since EUID may not work in all contexts
+    # Detect if running as root and set SUDO_CMD accordingly
+    # Don't block execution, just adjust behavior
     IS_ROOT=false
-    if [ -n "${EUID:-}" ] && [ "$EUID" -eq 0 ]; then
-        IS_ROOT=true
-    elif [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
-        IS_ROOT=true
-    elif [ "$(whoami 2>/dev/null || echo '')" = "root" ]; then
-        IS_ROOT=true
-    fi
+    USER_ID=$(id -u 2>/dev/null || echo "0")
     
-    if [ "$IS_ROOT" = true ]; then
+    if [ "$USER_ID" -eq 0 ]; then
+        IS_ROOT=true
         log_warning "⚠️  Running as root user detected"
-        log_info "It's recommended to run as a regular user with sudo privileges."
-        log_info "However, continuing installation as root..."
+        log_info "Continuing installation as root (sudo not needed)..."
         log_info ""
-        # When running as root, don't use sudo
         SUDO_CMD=""
     else
         # Check sudo access for non-root users
         if ! sudo -n true 2>/dev/null; then
             log_info "This script requires sudo access. You may be prompted for your password."
-            log_info "Testing sudo access..."
-            if ! sudo -v; then
+            if ! sudo -v 2>/dev/null; then
                 log_error "Cannot obtain sudo access. Please ensure you have sudo privileges."
                 exit 1
             fi
-        else
-            log_info "Sudo access confirmed"
         fi
         SUDO_CMD="sudo"
     fi
