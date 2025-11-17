@@ -662,14 +662,36 @@ main() {
     echo ""
     
     # Check if running as root
-    if [ "$EUID" -eq 0 ]; then
-        log_error "Please do not run this script as root. It will use sudo when needed."
-        exit 1
+    # Use multiple methods to detect root since EUID may not work in all contexts
+    IS_ROOT=false
+    if [ -n "${EUID:-}" ] && [ "$EUID" -eq 0 ]; then
+        IS_ROOT=true
+    elif [ "$(id -u 2>/dev/null || echo 0)" -eq 0 ]; then
+        IS_ROOT=true
+    elif [ "$(whoami 2>/dev/null || echo '')" = "root" ]; then
+        IS_ROOT=true
     fi
     
-    # Check sudo access
-    if ! sudo -n true 2>/dev/null; then
-        log_info "This script requires sudo access. You may be prompted for your password."
+    if [ "$IS_ROOT" = true ]; then
+        log_warning "⚠️  Running as root user detected"
+        log_info "It's recommended to run as a regular user with sudo privileges."
+        log_info "However, continuing installation as root..."
+        log_info ""
+        # When running as root, don't use sudo
+        SUDO_CMD=""
+    else
+        # Check sudo access for non-root users
+        if ! sudo -n true 2>/dev/null; then
+            log_info "This script requires sudo access. You may be prompted for your password."
+            log_info "Testing sudo access..."
+            if ! sudo -v; then
+                log_error "Cannot obtain sudo access. Please ensure you have sudo privileges."
+                exit 1
+            fi
+        else
+            log_info "Sudo access confirmed"
+        fi
+        SUDO_CMD="sudo"
     fi
     
     detect_os
