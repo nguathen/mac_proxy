@@ -491,7 +491,14 @@ install_warp() {
     ACCOUNT_STATUS=$(warp-cli account 2>&1 || echo "")
     if echo "$ACCOUNT_STATUS" | grep -qi "missing\|not registered\|register\|No account"; then
         log_info "Registering WARP..."
-        warp-cli register 2>&1 | grep -v "Success" || true
+        # Try different registration commands
+        if warp-cli registration new 2>&1 | grep -qi "success\|ok\|registered"; then
+            log_info "WARP registered using 'registration new'"
+        elif warp-cli register 2>&1 | grep -qi "success\|ok\|registered"; then
+            log_info "WARP registered using 'register'"
+        else
+            log_warning "WARP registration may have failed, but continuing..."
+        fi
         sleep 2
     else
         log_info "WARP already registered"
@@ -512,34 +519,26 @@ install_warp() {
             sleep 2
         fi
         
-        # Set proxy port to 8111
+        # Set proxy port to 8111 (correct syntax: warp-cli proxy port 8111)
         log_info "Setting WARP proxy port to 8111..."
         CURRENT_PORT=$(warp-cli proxy status 2>/dev/null | grep -i "port" | awk '{print $NF}' || echo "")
         
         if echo "$CURRENT_PORT" | grep -q "8111"; then
             log_info "WARP proxy port already set to 8111"
         else
-            # Try to set port (may need different syntax)
-            if warp-cli proxy set-port 8111 2>&1 | grep -qi "success\|ok\|set"; then
-                log_info "Set proxy port to 8111"
-            elif warp-cli proxy port 8111 2>&1 | grep -qi "success\|ok\|set"; then
-                log_info "Set proxy port to 8111"
+            # Use correct syntax: warp-cli proxy port 8111
+            log_info "Running: warp-cli proxy port 8111"
+            warp-cli proxy port 8111 2>&1 | grep -v "Success" || true
+            sleep 2
+            
+            # Verify port was set
+            VERIFY_PORT=$(warp-cli proxy status 2>/dev/null | grep -i "port" | awk '{print $NF}' || echo "")
+            if echo "$VERIFY_PORT" | grep -q "8111"; then
+                log_success "WARP proxy port set to 8111"
             else
-                # Configure via config file
-                WARP_CONFIG="/var/lib/cloudflare-warp/settings.json"
-                if [ -w "$WARP_CONFIG" ] || [ -w "$(dirname "$WARP_CONFIG")" ]; then
-                    log_info "Configuring proxy port via config file..."
-                    ${SUDO_CMD} mkdir -p "$(dirname "$WARP_CONFIG")"
-                    # Try to update config (may require service restart)
-                    log_info "Proxy port will be configured to 8111"
-                    log_warning "You may need to restart WARP service after configuration"
-                else
-                    log_warning "Could not set proxy port automatically"
-                    log_info "Manual configuration may be required"
-                    log_info "Run: warp-cli proxy --help to see available options"
-                fi
+                log_warning "Could not verify proxy port, but command executed"
+                log_info "You can verify with: warp-cli proxy status"
             fi
-            sleep 1
         fi
     else
         # Fallback: Try macOS syntax or config file
@@ -990,6 +989,44 @@ main() {
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         cd "$HOME/mac_proxy"
         ./launch_linux.sh start
+        
+        # Wait a bit and check HAProxy 7890 status
+        sleep 3
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "📊 Checking service status..."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        # Check HAProxy 7890
+        HAPROXY_PID_FILE="$HOME/mac_proxy/services/haproxy_7890/logs/haproxy_7890.pid"
+        if [ -f "$HAPROXY_PID_FILE" ]; then
+            HAPROXY_PID=$(cat "$HAPROXY_PID_FILE" 2>/dev/null || echo "")
+            if [ -n "$HAPROXY_PID" ] && kill -0 "$HAPROXY_PID" 2>/dev/null; then
+                echo "✅ HAProxy 7890: Running (PID: $HAPROXY_PID)"
+                echo "   Proxy: socks5://0.0.0.0:7890"
+            else
+                echo "❌ HAProxy 7890: Not running"
+                echo "   Try: cd $HOME/mac_proxy && ./launch_linux.sh start"
+            fi
+        else
+            echo "❌ HAProxy 7890: Not started"
+            echo "   Try: cd $HOME/mac_proxy && ./launch_linux.sh start"
+        fi
+        
+        # Check WARP
+        if nc -z 127.0.0.1 8111 2>/dev/null; then
+            echo "✅ WARP Proxy: Running on port 8111"
+        else
+            echo "⚠️  WARP Proxy: Port 8111 not accessible"
+        fi
+        
+        echo ""
+        echo "📝 To check full status: cd $HOME/mac_proxy && ./launch_linux.sh status"
+    else
+        echo ""
+        echo "💡 To start the system later:"
+        echo "   cd $HOME/mac_proxy"
+        echo "   ./launch_linux.sh start"
     fi
 }
 
