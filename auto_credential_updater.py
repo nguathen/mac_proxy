@@ -125,11 +125,11 @@ class AutoCredentialUpdater:
                 lines = f.readlines()
                 recent_lines = lines[-50:] if len(lines) > 50 else lines
                 
-                # Kiểm tra lỗi 407 trong 5 phút gần nhất
+                # Kiểm tra lỗi 407 hoặc i/o timeout trong 5 phút gần nhất
                 for line in recent_lines:
-                    if '"407 Proxy Authentication Required"' in line:
+                    if '407 Proxy Authentication Required' in line or 'i/o timeout' in line:
                         # Kiểm tra timestamp (trong 5 phút gần nhất)
-                        if self._is_recent_error(line):
+                        if self._is_recent_error_simple(line):
                             return True
         except Exception as e:
             print(f"❌ Error reading log file {log_file}: {e}")
@@ -153,6 +153,24 @@ class AutoCredentialUpdater:
         except Exception:
             pass
         return False
+    
+    def _is_recent_error_simple(self, log_line: str) -> bool:
+        """Kiểm tra lỗi gần đây cho gost log format: 2025/11/17 18:25:55"""
+        try:
+            # Parse timestamp từ gost log format: 2025/11/17 18:25:55
+            if log_line.startswith('20'):
+                parts = log_line.split(' ')
+                if len(parts) >= 2:
+                    date_str = parts[0]  # 2025/11/17
+                    time_str = parts[1]  # 18:25:55
+                    datetime_str = f"{date_str} {time_str}"
+                    log_time = datetime.strptime(datetime_str, '%Y/%m/%d %H:%M:%S')
+                    now = datetime.now()
+                    time_diff = (now - log_time).total_seconds()
+                    return time_diff < 300  # 5 minutes
+        except Exception:
+            pass
+        return True  # Nếu không parse được timestamp, coi như recent để trigger update
         
     def _extract_port_from_config_file(self, config_file: str) -> Optional[str]:
         """Trích xuất port từ tên config file"""
@@ -240,7 +258,7 @@ class AutoCredentialUpdater:
             
             # API 1: localhost
             try:
-                response1 = requests.get("http://localhost:18112/api/profiles/count-open", timeout=10)
+                response1 = requests.get("https://btmg25.ddns.net/api/profiles/count-open", timeout=10)
                 if response1.status_code == 200:
                     data1 = response1.json()
                     if isinstance(data1, list):
@@ -256,7 +274,7 @@ class AutoCredentialUpdater:
             
             # API 2: btm2025.ddns.net
             try:
-                response2 = requests.get("http://btm2025.ddns.net:18112/api/profiles/count-open", timeout=10)
+                response2 = requests.get("https://btmg25.ddns.net/api/profiles/count-open", timeout=10)
                 if response2.status_code == 200:
                     data2 = response2.json()
                     if isinstance(data2, list):
@@ -316,19 +334,19 @@ class AutoCredentialUpdater:
                         # Kiểm tra xem HAProxy tương ứng có tồn tại không
                         haproxy_config_exists = os.path.exists(os.path.join(self.config_dir, f"haproxy_{haproxy_port}.cfg"))
                         
-                        # Nếu HAProxy port này đang được sử dụng VÀ HAProxy config tồn tại, thì không xóa Gost
-                        if haproxy_port in used_ports and haproxy_config_exists:
-                            print(f"🛡️  Protecting Gost {gost_port} (belongs to active HAProxy {haproxy_port})")
-                            continue
-                            
-                        # Nếu Gost port trực tiếp được sử dụng, cũng không xóa
+                        # Nếu Gost port trực tiếp được sử dụng, không xóa
                         if gost_port in used_ports:
                             print(f"🛡️  Protecting Gost {gost_port} (directly used)")
                             continue
                         
-                        # Nếu HAProxy không tồn tại, Gost bị orphaned - xóa ngay lập tức
+                        # Nếu HAProxy port này đang được sử dụng, thì không xóa Gost (bảo vệ cả khi không có HAProxy config)
+                        if haproxy_port in used_ports:
+                            print(f"🛡️  Protecting Gost {gost_port} (belongs to active HAProxy port {haproxy_port})")
+                            continue
+                        
+                        # Nếu HAProxy không tồn tại và không được sử dụng, Gost bị orphaned - xóa ngay lập tức
                         if not haproxy_config_exists:
-                            print(f"🔍 Gost {gost_port} orphaned (HAProxy {haproxy_port} config missing)")
+                            print(f"🔍 Gost {gost_port} orphaned (HAProxy {haproxy_port} config missing and not used)")
                             print(f"🧹 Cleaning up orphaned Gost service on port {gost_port}")
                             self._stop_and_remove_gost_service(gost_port)
                             continue
@@ -589,3 +607,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -9,7 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 get_protonvpn_auth() {
     # Sử dụng Python để lấy password từ protonvpn_service.Instance.password
     # Ensure we're in the right directory and can import the module
-    local password=$(cd "$SCRIPT_DIR" && python3 -c "
+    # Remove old .pyc files that might contain hardcoded paths
+    cd "$SCRIPT_DIR" && find . -name "*.pyc" -delete 2>/dev/null
+    find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+    
+    local password=$(cd "$SCRIPT_DIR" && python3 -B -c "
 import sys
 import os
 
@@ -27,7 +31,9 @@ try:
 except Exception as e:
     # Print error to stderr for debugging
     import sys
+    import traceback
     print(f'Error: {e}', file=sys.stderr)
+    print(traceback.format_exc(), file=sys.stderr)
     print('', end='')
 " 2>&1)
     

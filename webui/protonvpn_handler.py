@@ -13,6 +13,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from protonvpn_api import ProtonVPNAPI
 from proxy_api import ProxyAPI
 
+# Import protonvpn_service để lấy credentials
+try:
+    from protonvpn_service import Instance as ProtonVpnServiceInstance
+except ImportError:
+    ProtonVpnServiceInstance = None
+
 # Initialize APIs
 protonvpn_api = None
 proxy_api = None
@@ -213,7 +219,7 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                 used_proxies = set()
                 try:
                     import requests
-                    response = requests.get("http://localhost:18112/api/profiles/list-proxy", timeout=5)
+                    response = requests.get("https://btmg25.ddns.net/api/profiles/list-proxy", timeout=5)
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, dict) and 'data' in data:
@@ -292,99 +298,27 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
             
             # Use port-based management
             
-            # Get ProtonVPN auth using dedicated script
-            import subprocess
+            # Get ProtonVPN auth credentials (username:password) from protonvpn_service
             try:
-                # Auto-detect base directory - use BASE_DIR from app.py if available
-                # Otherwise detect from current file location
-                try:
-                    # Try to get BASE_DIR from app module
-                    import webui.app as app_module
-                    base_dir = getattr(app_module, 'BASE_DIR', None)
-                except:
-                    base_dir = None
-                
-                if not base_dir:
-                    # Auto-detect base directory from current file
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    base_dir = os.path.dirname(script_dir)  # webui -> parent
-                
-                # Verify this is the right directory
-                if not os.path.exists(base_dir) or not os.path.exists(os.path.join(base_dir, 'get_protonvpn_auth.sh')):
-                    # Try to find mac_proxy directory
-                    current = base_dir
-                    found = False
-                    while current != os.path.dirname(current):
-                        if os.path.exists(os.path.join(current, 'get_protonvpn_auth.sh')):
-                            base_dir = current
-                            found = True
-                            break
-                        current = os.path.dirname(current)
-                    
-                    # Fallback to home directory
-                    if not found:
-                        base_dir = os.path.expanduser("~/mac_proxy")
-                
-                # Verify base_dir exists
-                if not os.path.exists(base_dir):
+                if not ProtonVpnServiceInstance:
                     return jsonify({
                         'success': False,
-                        'error': f'Base directory does not exist: {base_dir}. Please ensure mac_proxy is installed correctly.'
+                        'error': 'ProtonVPN service not available. Please ensure protonvpn_service is properly configured.'
                     }), 500
                 
-                # Verify auth script exists
-                auth_script = os.path.join(base_dir, 'get_protonvpn_auth.sh')
-                if not os.path.exists(auth_script):
+                # Get username and password from protonvpn_service
+                username = ProtonVpnServiceInstance.user_name
+                password = ProtonVpnServiceInstance.password
+                
+                if not username or not password:
                     return jsonify({
                         'success': False,
-                        'error': f'Auth script not found: {auth_script}. Please ensure mac_proxy is installed correctly.'
+                        'error': 'ProtonVPN credentials not available. Please wait a moment and try again, or check protonvpn_service configuration.'
                     }), 500
                 
-                # Call get_protonvpn_auth.sh script
-                # Ensure we're in the base_dir when running the script
-                result = subprocess.run(['bash', auth_script], 
-                                      capture_output=True, text=True, timeout=10, 
-                                      cwd=base_dir,
-                                      env={**os.environ, 'PYTHONPATH': base_dir})
+                # Create proxy URL with username:password format
+                proxy_url = f"https://{username}:{password}@{proxy_host}:{proxy_port}"
                 
-                # Check for errors in stderr first
-                if result.stderr and result.stderr.strip():
-                    error_msg = result.stderr.strip()
-                    # Filter out common Python warnings
-                    if 'Error:' in error_msg or 'Traceback' in error_msg or 'FileNotFoundError' in error_msg:
-                        # Extract the actual error
-                        if '/Volumes/Ssd/Projects/mac_proxy' in error_msg:
-                            return jsonify({
-                                'success': False,
-                                'error': f'Path error detected. Base directory: {base_dir}. Please restart Web UI after updating code.'
-                            }), 500
-                        return jsonify({
-                            'success': False,
-                            'error': f'Failed to get ProtonVPN auth: {error_msg}'
-                        }), 500
-                
-                if result.returncode == 0 and result.stdout.strip():
-                    auth_token = result.stdout.strip()
-                    # Remove any error messages that might have been printed to stdout
-                    auth_token = auth_token.split('\n')[0].strip()
-                    if auth_token and not auth_token.startswith('Error:'):
-                        proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
-                    else:
-                        return jsonify({
-                            'success': False,
-                            'error': f'Failed to get ProtonVPN auth token. Output: {result.stdout[:200]}'
-                        }), 500
-                else:
-                    error_msg = result.stderr.strip() if result.stderr else (result.stdout.strip() if result.stdout else 'Unknown error')
-                    return jsonify({
-                        'success': False,
-                        'error': f'Failed to get ProtonVPN auth token: {error_msg}'
-                    }), 500
-            except FileNotFoundError as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'File not found: {str(e)}. Please ensure mac_proxy is installed correctly.'
-                }), 500
             except Exception as e:
                 import traceback
                 error_detail = traceback.format_exc()

@@ -315,6 +315,13 @@ def api_status():
                 if monitor_pid:
                     result = subprocess.run(['ps', '-p', monitor_pid], capture_output=True, text=True)
                     monitor_running = result.returncode == 0
+                    # Tự động xóa PID file nếu process không chạy nữa
+                    if not monitor_running:
+                        try:
+                            os.remove(monitor_pid_file)
+                            monitor_pid = None
+                        except:
+                            pass
         except:
             pass
         

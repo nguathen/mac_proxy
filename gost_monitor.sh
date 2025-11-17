@@ -3,7 +3,8 @@
 # Auto-restart gost nếu connection fail
 
 # Không dùng set -e trong script này vì monitor loop cần tiếp tục chạy ngay cả khi có lỗi
-set -uo pipefail
+# Chỉ dùng set -u để bắt undefined variables, không dùng pipefail để tránh exit
+set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -68,18 +69,14 @@ restart_gost_port() {
     local result=""
     local exit_code=1
     
-    # Tắt exit on error tạm thời để không crash script
-    set +e
     result=$(bash "$MANAGE_GOST_SCRIPT" restart-port "$port" 2>&1)
     exit_code=$?
-    set -e
     
     if [ $exit_code -eq 0 ]; then
         # Đợi một chút để gost khởi động
         sleep 3
         
-        # Kiểm tra lại với error handling
-        set +e
+        # Kiểm tra lại
         local process_ok=false
         local proxy_ok=false
         
@@ -90,7 +87,6 @@ restart_gost_port() {
         if check_gost_proxy "$port"; then
             proxy_ok=true
         fi
-        set -e
         
         if [ "$process_ok" = true ] && [ "$proxy_ok" = true ]; then
             log "✅ Gost on port $port restarted successfully"
@@ -133,12 +129,13 @@ monitor_loop() {
         log "⚠️  No gost configs found, monitor will check periodically"
     fi
     
-    # Trap để log khi exit
-    trap 'log "⚠️  Monitor loop exiting (PID: $$)"' EXIT
+    # Trap để log khi exit hoặc bị kill
+    trap 'log "⚠️  Monitor loop exiting (PID: $$, signal: EXIT)"' EXIT
+    trap 'log "⚠️  Monitor loop killed (PID: $$, signal: SIGTERM)"; exit 0' TERM
+    trap 'log "⚠️  Monitor loop interrupted (PID: $$, signal: SIGINT)"; exit 0' INT
     
     while true; do
-        # Thêm error handling để tránh crash
-        set +e  # Tạm thời tắt exit on error
+        # Monitor loop không bao giờ dùng set -e để tránh exit
         
         local current_time=$(date +%s)
         
@@ -226,7 +223,7 @@ monitor_loop() {
             fi
         done
         
-        set -e  # Bật lại exit on error
+        # KHÔNG bật lại set -e vì monitor loop phải chạy liên tục
         
         sleep "$CHECK_INTERVAL"
     done

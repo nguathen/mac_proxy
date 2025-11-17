@@ -170,7 +170,7 @@ def register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_c
                 used_proxies = set()
                 try:
                     import requests
-                    response = requests.get("http://localhost:18112/api/profiles/list-proxy", timeout=5)
+                    response = requests.get("https://btmg25.ddns.net/api/profiles/list-proxy", timeout=5)
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, dict) and 'data' in data:
