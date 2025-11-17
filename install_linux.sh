@@ -902,6 +902,157 @@ LAUNCH_EOF
     log_success "Linux launch script created"
 }
 
+# Create test Gost configuration
+create_test_gost_config() {
+    log_info "Creating test Gost configuration..."
+    
+    INSTALL_DIR="$HOME/mac_proxy"
+    CONFIG_DIR="$INSTALL_DIR/config"
+    
+    # Create config directory if it doesn't exist
+    mkdir -p "$CONFIG_DIR"
+    
+    # Create a simple test config for Gost on port 7891
+    # Using a simple HTTP proxy for testing (you can change this later)
+    TEST_CONFIG_FILE="$CONFIG_DIR/gost_7891.config"
+    
+    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+        log_info "Creating test Gost config on port 7891..."
+        
+        # Create a simple test config using a public proxy or direct connection
+        # For testing, we'll use a simple SOCKS5 listener that forwards to WARP
+        cat > "$TEST_CONFIG_FILE" <<EOF
+{
+    "port": "7891",
+    "provider": "test",
+    "country": "test",
+    "proxy_url": "socks5://127.0.0.1:8111",
+    "proxy_host": "127.0.0.1",
+    "proxy_port": "8111",
+    "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+        log_success "Test Gost config created: $TEST_CONFIG_FILE"
+        log_info "This config forwards to WARP proxy (127.0.0.1:8111) for testing"
+        log_info "You can modify this config later or create new ones via Web UI"
+    else
+        log_info "Gost config already exists: $TEST_CONFIG_FILE"
+    fi
+    
+    # Also create a test script to start Gost manually
+    TEST_SCRIPT="$INSTALL_DIR/test_gost.sh"
+    if [ ! -f "$TEST_SCRIPT" ]; then
+        log_info "Creating test script: $TEST_SCRIPT"
+        cat > "$TEST_SCRIPT" <<'TEST_EOF'
+#!/usr/bin/env bash
+# test_gost.sh
+# Script để test Gost configuration
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🧪 Testing Gost Configuration"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Check if Gost is installed
+if ! command -v gost &> /dev/null; then
+    echo "❌ Gost is not installed"
+    echo "   Run: cd $SCRIPT_DIR && ./install_linux.sh"
+    exit 1
+fi
+
+echo "✅ Gost found: $(command -v gost)"
+echo ""
+
+# Check if config exists
+if [ ! -f "config/gost_7891.config" ]; then
+    echo "❌ Config file not found: config/gost_7891.config"
+    exit 1
+fi
+
+echo "✅ Config file found: config/gost_7891.config"
+echo ""
+
+# Read config
+PROXY_URL=$(cat config/gost_7891.config | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+PORT=$(cat config/gost_7891.config | jq -r '.port // "7891"' 2>/dev/null || echo "7891")
+
+if [ -z "$PROXY_URL" ] || [ "$PROXY_URL" = "null" ]; then
+    echo "❌ Invalid config: proxy_url is empty"
+    exit 1
+fi
+
+echo "📋 Config details:"
+echo "   Port: $PORT"
+echo "   Proxy URL: $PROXY_URL"
+echo ""
+
+# Check if port is already in use
+if command -v lsof &> /dev/null; then
+    if lsof -i :$PORT >/dev/null 2>&1; then
+        echo "⚠️  Port $PORT is already in use"
+        lsof -i :$PORT
+        echo ""
+        read -p "Do you want to kill the process and restart? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            lsof -ti :$PORT | xargs kill -9 2>/dev/null || true
+            sleep 1
+        else
+            exit 1
+        fi
+    fi
+fi
+
+# Start Gost
+echo "🚀 Starting Gost on port $PORT..."
+echo "   Command: gost -L socks5://:$PORT -F $PROXY_URL"
+echo ""
+
+mkdir -p logs
+nohup gost -L socks5://:$PORT -F "$PROXY_URL" > logs/gost_${PORT}_test.log 2>&1 &
+GOST_PID=$!
+
+sleep 2
+
+# Check if Gost started successfully
+if kill -0 "$GOST_PID" 2>/dev/null; then
+    echo "✅ Gost started successfully (PID: $GOST_PID)"
+    echo ""
+    echo "🧪 Testing proxy connection..."
+    
+    # Test the proxy
+    if curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://api.ipify.org >/dev/null 2>&1; then
+        IP=$(curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://api.ipify.org 2>/dev/null || echo "N/A")
+        echo "✅ Proxy is working!"
+        echo "   Your IP through proxy: $IP"
+        echo ""
+        echo "📊 Proxy endpoint: socks5://127.0.0.1:$PORT"
+        echo "📝 Logs: logs/gost_${PORT}_test.log"
+        echo ""
+        echo "🛑 To stop Gost: kill $GOST_PID"
+    else
+        echo "⚠️  Proxy started but connection test failed"
+        echo "   Check logs: logs/gost_${PORT}_test.log"
+        echo "   PID: $GOST_PID"
+    fi
+else
+    echo "❌ Failed to start Gost"
+    echo "   Check logs: logs/gost_${PORT}_test.log"
+    exit 1
+fi
+TEST_EOF
+        chmod +x "$TEST_SCRIPT"
+        log_success "Test script created: $TEST_SCRIPT"
+    else
+        log_info "Test script already exists: $TEST_SCRIPT"
+    fi
+    
+    log_info "To test Gost, run: cd $INSTALL_DIR && ./test_gost.sh"
+}
+
 # Main installation
 main() {
     echo ""
@@ -942,6 +1093,7 @@ main() {
     install_python_deps
     make_executable
     create_launch_script
+    create_test_gost_config
     
     # Ask if user wants to create systemd service
     read -p "Do you want to create systemd service for auto-start? (y/N): " -n 1 -r
@@ -968,6 +1120,10 @@ main() {
     echo "📊 To check status:"
     echo "   cd $HOME/mac_proxy"
     echo "   ./launch_linux.sh status"
+    echo ""
+    echo "🧪 To test Gost:"
+    echo "   cd $HOME/mac_proxy"
+    echo "   ./test_gost.sh"
     echo ""
     echo "🌐 Web UI will be available at:"
     echo "   http://127.0.0.1:5000"
