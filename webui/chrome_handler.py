@@ -10,9 +10,15 @@ import glob
 import random
 import requests
 import logging
+import time
+from functools import lru_cache
 
 # Add parent directory to path to import modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Cache cho API status calls (5 giây TTL)
+_status_cache = {}
+_status_cache_ttl = 5
 
 def _apply_server_with_fallback(gost_port, apply_data, vpn_provider):
     """
@@ -233,15 +239,42 @@ def _find_available_port(start_port, used_ports, BASE_DIR, max_port=7999):
             return port
     return None
 
+def _get_cached_status():
+    """Lấy status với caching để giảm API calls"""
+    global _status_cache
+    current_time = time.time()
+    
+    # Kiểm tra cache
+    if 'data' in _status_cache and 'timestamp' in _status_cache:
+        if current_time - _status_cache['timestamp'] < _status_cache_ttl:
+            return _status_cache['data']
+    
+    # Fetch mới
+    try:
+        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
+        if status_response.status_code == 200:
+            status_data = status_response.json()
+            _status_cache = {
+                'data': status_data,
+                'timestamp': current_time
+            }
+            return status_data
+    except Exception as e:
+        logging.warning(f"[CACHE] Failed to fetch status: {e}")
+        # Return cached data nếu có, dù đã hết hạn
+        if 'data' in _status_cache:
+            return _status_cache['data']
+    
+    return None
+
 def _find_orphaned_gost_for_port(requested_port):
     """Tìm Gost đang chạy với port yêu cầu"""
     try:
-        # Lấy danh sách services
-        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
-        if status_response.status_code != 200:
+        # Lấy danh sách services với cache
+        status_data = _get_cached_status()
+        if status_data is None:
             return None
         
-        status_data = status_response.json()
         gost_services = status_data.get('gost', [])
         
         # Tìm Gost đang chạy với port yêu cầu (Gost giờ chạy trực tiếp trên 789x)
@@ -265,12 +298,11 @@ def _find_orphaned_gost_for_port(requested_port):
 def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port):
     """Tìm Gost đang rảnh (không được sử dụng bởi profiles) hoặc có cùng server và port"""
     try:
-        # Lấy danh sách Gost đang chạy
-        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
-        if status_response.status_code != 200:
+        # Lấy danh sách Gost đang chạy với cache
+        status_data = _get_cached_status()
+        if status_data is None:
             return None
         
-        status_data = status_response.json()
         gost_services = status_data.get('gost', [])
         
         # Lấy danh sách ports đang được sử dụng bởi profiles
