@@ -1,298 +1,367 @@
 # NordVPN Integration
 
-Hệ thống proxy đã được tích hợp với NordVPN, cho phép bạn dễ dàng chọn và áp dụng server NordVPN vào wireproxy.
+Hệ thống tích hợp NordVPN với 5000+ servers trên 46 quốc gia.
 
-## Tính năng
+## ✨ Tính năng
 
-- ✅ Tự động lấy danh sách server NordVPN từ API
-- ✅ Cache danh sách server (1 giờ)
+- ✅ Tự động lấy danh sách servers từ NordVPN API
+- ✅ Cache servers (1 giờ)
 - ✅ Chọn server theo quốc gia
-- ✅ Tự động tìm server tốt nhất (load thấp nhất)
-- ✅ Áp dụng server vào wireproxy instance
-- ✅ Giao diện Web UI
-- ✅ Command line interface (CLI)
+- ✅ Tự động tìm best server (load thấp nhất)
+- ✅ Áp dụng server vào Gost instance
+- ✅ Web UI và CLI
 
-## Yêu cầu
-
-PrivateKey của NordVPN sẽ được tự động tạo khi cần thiết.
-
-## Sử dụng qua Web UI
+## 🚀 Sử dụng qua Web UI
 
 1. Mở Web UI: http://localhost:5000
 
-2. Tìm phần "🌍 NordVPN Server Selection"
+2. Chọn tab "NordVPN"
 
 3. Chọn quốc gia từ dropdown
 
 4. Chọn server (servers được sắp xếp theo load thấp nhất)
 
-5. Xem thông tin server
+5. Xem thông tin server:
+   - Hostname
+   - Load (%)
+   - Location
+   - Status
 
-6. Click "Apply to Wireproxy 1" hoặc "Apply to Wireproxy 2"
+6. Chọn Gost port (7891, 7892, ...)
 
-7. Server sẽ được áp dụng và wireproxy sẽ tự động restart
+7. Click "Apply to Gost"
 
-## Sử dụng qua CLI
+8. Gost sẽ tự động:
+   - Cập nhật cấu hình
+   - Restart instance
+   - Test connection
 
-### 1. List tất cả quốc gia
+## 🔧 API Endpoints
+
+### Lấy danh sách quốc gia
 
 ```bash
-python3 nordvpn_cli.py countries
+GET /api/nordvpn/countries
+
+# Response:
+{
+  "success": true,
+  "countries": [
+    {"code": "US", "name": "United States"},
+    {"code": "JP", "name": "Japan"},
+    {"code": "SG", "name": "Singapore"}
+  ]
+}
 ```
 
-### 2. List servers theo quốc gia
+### Lấy tất cả servers
 
 ```bash
-# List 20 servers đầu tiên ở US
-python3 nordvpn_cli.py servers --country US
+GET /api/nordvpn/servers
 
-# List 50 servers đầu tiên ở JP
-python3 nordvpn_cli.py servers --country JP --limit 50
+# Optional: Force refresh
+GET /api/nordvpn/servers?refresh=true
 
-# Force refresh từ API
-python3 nordvpn_cli.py servers --refresh
+# Response:
+{
+  "success": true,
+  "servers": [
+    {
+      "name": "Japan #720",
+      "hostname": "jp720.nordvpn.com",
+      "load": 15,
+      "country": "JP",
+      "location": "Tokyo",
+      "status": "online"
+    }
+  ]
+}
 ```
 
-### 3. Tìm server tốt nhất
+### Lấy servers theo quốc gia
+
+```bash
+GET /api/nordvpn/servers/JP
+
+# Response:
+{
+  "success": true,
+  "country": "JP",
+  "servers": [...]
+}
+```
+
+### Lấy best server
 
 ```bash
 # Best server globally
-python3 nordvpn_cli.py best
+GET /api/nordvpn/best
 
-# Best server ở Singapore
-python3 nordvpn_cli.py best --country SG
+# Best server theo quốc gia
+GET /api/nordvpn/best?country=SG
+
+# Response:
+{
+  "success": true,
+  "server": {
+    "name": "Singapore #528",
+    "hostname": "sg528.nordvpn.com",
+    "load": 8,
+    "country": "SG"
+  }
+}
 ```
 
-### 4. Áp dụng server vào wireproxy
+### Áp dụng server vào Gost
 
 ```bash
-# Áp dụng server cụ thể vào instance 1
-python3 nordvpn_cli.py apply 1 --server "Japan #720"
+POST /api/nordvpn/apply/7891
+Content-Type: application/json
 
-# Áp dụng server cụ thể vào instance 2
-python3 nordvpn_cli.py apply 2 --server "Singapore #528"
+{
+  "server_name": "Japan #720"
+}
+
+# Response:
+{
+  "success": true,
+  "message": "Applied Japan #720 to Gost 7891",
+  "port": 7891,
+  "server": "Japan #720",
+  "hostname": "jp720.nordvpn.com"
+}
 ```
 
-## Sử dụng qua Shell Script
+## 📋 Quốc gia phổ biến
 
-Script `apply_nordvpn.sh` cung cấp cách dễ dàng hơn để áp dụng server:
+| Code | Country | Servers |
+|------|---------|---------|
+| US | United States | 1000+ |
+| JP | Japan | 200+ |
+| SG | Singapore | 100+ |
+| GB | United Kingdom | 500+ |
+| DE | Germany | 300+ |
+| FR | France | 200+ |
+| CA | Canada | 300+ |
+| AU | Australia | 200+ |
+| NL | Netherlands | 300+ |
+| SE | Sweden | 100+ |
+| CH | Switzerland | 100+ |
+| HK | Hong Kong | 100+ |
+| KR | South Korea | 50+ |
+| TW | Taiwan | 50+ |
+| IN | India | 50+ |
 
-### List countries
+## 🔄 Cache
+
+Danh sách servers được cache trong `nordvpn_servers_cache.json` với thời gian 1 giờ.
+
+**Force refresh:**
+- Web UI: Click "Refresh Servers"
+- API: `GET /api/nordvpn/servers?refresh=true`
+- CLI: Xóa cache file
 
 ```bash
-bash apply_nordvpn.sh --list-countries
+rm nordvpn_servers_cache.json
 ```
 
-### List servers theo quốc gia
+## 🔍 Cách hoạt động
 
-```bash
-bash apply_nordvpn.sh --list-servers JP
-bash apply_nordvpn.sh --list-servers US
-bash apply_nordvpn.sh --list-servers SG
+### 1. Lấy danh sách servers
+
+```python
+from nordvpn_api import NordVPNAPI
+
+api = NordVPNAPI('nordvpn_servers_cache.json')
+servers = api.get_servers()
 ```
 
-### Áp dụng server cụ thể
+### 2. Lọc theo quốc gia
 
-```bash
-# Áp dụng server cụ thể vào instance 1
-bash apply_nordvpn.sh --instance 1 --server "Japan #720"
-
-# Áp dụng server cụ thể vào instance 2
-bash apply_nordvpn.sh --instance 2 --server "Singapore #528"
+```python
+jp_servers = api.get_servers_by_country('JP')
 ```
 
-### Áp dụng best server theo quốc gia
+### 3. Tìm best server
 
-```bash
-# Tự động chọn và áp dụng best server ở US vào instance 1
-bash apply_nordvpn.sh --instance 1 --country US
-
-# Tự động chọn và áp dụng best server ở JP vào instance 2
-bash apply_nordvpn.sh --instance 2 --country JP
+```python
+best = api.get_best_server('SG')
+# Trả về server có load thấp nhất
 ```
 
-Script sẽ:
-1. Tìm best server
-2. Cập nhật config file
-3. Hỏi có muốn restart wireproxy không
-4. Nếu có, sẽ restart và test connection
-
-## Workflow ví dụ
-
-### Scenario 1: Chọn server Japan cho instance 1
+### 4. Áp dụng vào Gost
 
 ```bash
-# 1. List servers ở Japan
-bash apply_nordvpn.sh --list-servers JP
+# Lấy thông tin server
+hostname = "jp720.nordvpn.com"
+proxy_host = hostname
+proxy_port = "89"  # NordVPN HTTPS proxy port
 
-# 2. Chọn server có load thấp nhất
-bash apply_nordvpn.sh --instance 1 --server "Japan #720"
+# Tạo proxy URL
+proxy_url = f"https://USMbUonbFpF9xEx8xR3MHSau:buKKKPURZNMTW7A6rwm3qtBn@{proxy_host}:{proxy_port}"
 
-# 3. Script sẽ tự động restart và test
+# Cấu hình Gost
+./manage_gost.sh config 7891 nordvpn "jp" "$proxy_host" "$proxy_port"
+
+# Restart Gost
+./manage_gost.sh restart
 ```
 
-### Scenario 2: Quick apply best server
+## 🧪 Testing
 
-```bash
-# Tự động chọn và áp dụng best server ở Singapore
-bash apply_nordvpn.sh --instance 2 --country SG
+### Test server selection
 
-# Script sẽ tự động:
-# - Tìm server tốt nhất
-# - Cập nhật config
-# - Restart wireproxy
-# - Test connection
+```python
+from nordvpn_api import NordVPNAPI
+
+api = NordVPNAPI('nordvpn_servers_cache.json')
+
+# Lấy best server ở Japan
+best = api.get_best_server('JP')
+print(f"Best server: {best['name']}")
+print(f"Load: {best['load']}%")
+print(f"Hostname: {best['hostname']}")
 ```
 
-### Scenario 3: Sử dụng Web UI
-
-1. Mở http://localhost:5000
-2. Scroll xuống phần "NordVPN Server Selection"
-3. Chọn country "Japan"
-4. Chọn server từ dropdown (đã sort theo load)
-5. Xem thông tin server
-6. Click "Apply to Wireproxy 1"
-7. Đợi restart và test
-
-## API Endpoints
-
-Web UI cung cấp các API endpoints:
-
-### GET /api/nordvpn/countries
-Lấy danh sách quốc gia
+### Test proxy connection
 
 ```bash
-curl http://localhost:5000/api/nordvpn/countries
+# Áp dụng server
+curl -X POST http://localhost:5000/api/nordvpn/apply/7891 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "Japan #720"}'
+
+# Test connection
+curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+
+# Kiểm tra IP
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/json
 ```
 
-### GET /api/nordvpn/servers
-Lấy tất cả servers
+## 🐛 Troubleshooting
+
+### Server list rỗng
 
 ```bash
-curl http://localhost:5000/api/nordvpn/servers
+# Xóa cache và force refresh
+rm nordvpn_servers_cache.json
 
-# Force refresh
+# Restart Web UI
+./start_webui_daemon.sh
+
+# Hoặc gọi API với refresh=true
 curl http://localhost:5000/api/nordvpn/servers?refresh=true
 ```
 
-### GET /api/nordvpn/servers/:country_code
-Lấy servers theo quốc gia
+### Connection failed
 
 ```bash
+# Kiểm tra Gost logs
+tail -f logs/gost_7891.log
+
+# Kiểm tra cấu hình
+./manage_gost.sh show-config
+
+# Test proxy URL trực tiếp
+curl -x https://USMbUonbFpF9xEx8xR3MHSau:buKKKPURZNMTW7A6rwm3qtBn@jp720.nordvpn.com:89 \
+  https://api.ipify.org
+
+# Restart Gost
+./manage_gost.sh restart
+```
+
+### Credentials không hoạt động
+
+```bash
+# Credentials được hardcode trong manage_gost.sh
+# Nếu không hoạt động, cần cập nhật credentials mới
+
+# Kiểm tra trong manage_gost.sh:
+grep "USMbUonbFpF9xEx8xR3MHSau" manage_gost.sh
+```
+
+## 📊 Server Selection Logic
+
+### Best Server Algorithm
+
+1. Lấy tất cả servers của quốc gia
+2. Lọc servers online
+3. Sắp xếp theo load (thấp → cao)
+4. Trả về server đầu tiên (load thấp nhất)
+
+### Load Balancing
+
+- Load < 20%: Excellent
+- Load 20-50%: Good
+- Load 50-80%: Fair
+- Load > 80%: Poor
+
+Web UI hiển thị màu sắc theo load:
+- 🟢 Green: < 20%
+- 🟡 Yellow: 20-50%
+- 🟠 Orange: 50-80%
+- 🔴 Red: > 80%
+
+## 🔐 Credentials
+
+NordVPN sử dụng credentials cố định:
+- Username: `USMbUonbFpF9xEx8xR3MHSau`
+- Password: `buKKKPURZNMTW7A6rwm3qtBn`
+
+Credentials được hardcode trong `manage_gost.sh`.
+
+**Lưu ý:** Credentials này có thể expire, cần cập nhật định kỳ.
+
+## 📝 Examples
+
+### Example 1: Chọn best server ở US
+
+```bash
+# Qua API
+curl http://localhost:5000/api/nordvpn/best?country=US
+
+# Áp dụng vào Gost 7891
+curl -X POST http://localhost:5000/api/nordvpn/apply/7891 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "United States #1234"}'
+
+# Test
+curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+```
+
+### Example 2: List servers ở Japan
+
+```bash
+# Lấy danh sách
 curl http://localhost:5000/api/nordvpn/servers/JP
-curl http://localhost:5000/api/nordvpn/servers/US
-```
 
-### GET /api/nordvpn/best
-Lấy best server
-
-```bash
-# Best server globally
-curl http://localhost:5000/api/nordvpn/best
-
-# Best server theo quốc gia
-curl http://localhost:5000/api/nordvpn/best?country=SG
-```
-
-### POST /api/nordvpn/apply/:instance
-Áp dụng server vào wireproxy instance
-
-```bash
-curl -X POST http://localhost:5000/api/nordvpn/apply/1 \
+# Chọn server cụ thể
+curl -X POST http://localhost:5000/api/nordvpn/apply/7892 \
   -H "Content-Type: application/json" \
   -d '{"server_name": "Japan #720"}'
 ```
 
-## Cache
+### Example 3: Sử dụng nhiều servers
 
-Danh sách server được cache trong file `nordvpn_servers_cache.json` với thời gian 1 giờ.
-
-Để force refresh:
-- Web UI: Click nút "Refresh Servers"
-- CLI: `python3 nordvpn_cli.py servers --refresh`
-- API: `curl http://localhost:5000/api/nordvpn/servers?refresh=true`
-
-## Backup
-
-Mỗi khi áp dụng server mới, config cũ sẽ được backup với timestamp:
-- `wg18181.conf.backup.*` (nếu có)
-- `wg18182.conf.backup.*` (nếu có)
-
-## Troubleshooting
-
-### Server list rỗng
 ```bash
-# Force refresh từ API
-python3 nordvpn_cli.py servers --refresh
+# Gost 7891 → US server
+curl -X POST http://localhost:5000/api/nordvpn/apply/7891 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "United States #1234"}'
+
+# Gost 7892 → JP server
+curl -X POST http://localhost:5000/api/nordvpn/apply/7892 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "Japan #720"}'
+
+# Gost 7893 → SG server
+curl -X POST http://localhost:5000/api/nordvpn/apply/7893 \
+  -H "Content-Type: application/json" \
+  -d '{"server_name": "Singapore #528"}'
+
+# Test tất cả
+curl -x socks5h://127.0.0.1:7891 https://api.ipify.org  # US IP
+curl -x socks5h://127.0.0.1:7892 https://api.ipify.org  # JP IP
+curl -x socks5h://127.0.0.1:7893 https://api.ipify.org  # SG IP
 ```
-
-### Connection failed sau khi apply
-```bash
-# Check logs
-tail -f logs/wireproxy1.log
-tail -f logs/wireproxy2.log
-
-# Restart wireproxy
-bash manage_wireproxy.sh restart
-
-# Test connection
-curl -x socks5h://127.0.0.1:18181 https://api.ipify.org
-```
-
-### Private key not found
-Đảm bảo file config có PrivateKey:
-```bash
-# Kiểm tra config hiện tại (nếu có)
-ls -la wg18181.conf wg18182.conf 2>/dev/null || echo "Config files not found"
-```
-
-## Quốc gia phổ biến
-
-- US: United States
-- JP: Japan
-- SG: Singapore
-- GB: United Kingdom
-- DE: Germany
-- FR: France
-- CA: Canada
-- AU: Australia
-- NL: Netherlands
-- SE: Sweden
-- CH: Switzerland
-- HK: Hong Kong
-- KR: South Korea
-- TW: Taiwan
-- IN: India
-- BR: Brazil
-- AR: Argentina
-- MX: Mexico
-- IT: Italy
-- ES: Spain
-- PL: Poland
-- NO: Norway
-- DK: Denmark
-- FI: Finland
-- AT: Austria
-- BE: Belgium
-- CZ: Czech Republic
-- RO: Romania
-- BG: Bulgaria
-- GR: Greece
-- PT: Portugal
-- IE: Ireland
-- NZ: New Zealand
-- ZA: South Africa
-- IL: Israel
-- AE: United Arab Emirates
-- TR: Turkey
-- TH: Thailand
-- MY: Malaysia
-- ID: Indonesia
-- VN: Vietnam
-- PH: Philippines
-- CL: Chile
-- CO: Colombia
-- CR: Costa Rica
-- GE: Georgia
-- CY: Cyprus
 
