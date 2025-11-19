@@ -50,14 +50,4 @@ fi
 log "🚀 Khởi động hệ thống..."
 "$SCRIPT_DIR/start_all.sh" >> "$LOG_FILE" 2>&1
 
-# Khởi động WARP monitor nếu HAProxy 7890 đang chạy
-sleep 5
-if lsof -i :7890 >/dev/null 2>&1; then
-    log "🛡️  Khởi động WARP monitor..."
-    if [ -f "$SCRIPT_DIR/services/haproxy_7890/warp_monitor.sh" ]; then
-        cd "$SCRIPT_DIR/services/haproxy_7890"
-        ./warp_monitor.sh start >> "$SCRIPT_DIR/logs/warp_monitor_launchd.log" 2>&1 || true
-        cd "$SCRIPT_DIR"
-    fi
-fi
 

@@ -739,21 +739,6 @@ case "${1:-start}" in
         log "🚀 Starting Mac Proxy System"
         log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         
-        # Khởi động HAProxy 7890
-        log "🚀 Starting HAProxy 7890..."
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/start_haproxy_7890.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            chmod +x start_haproxy_7890.sh
-            ./start_haproxy_7890.sh >> "$SCRIPT_DIR/logs/haproxy_7890_launch.log" 2>&1 || true
-            cd "$SCRIPT_DIR"
-            log "✅ HAProxy 7890 started"
-        else
-            log "⚠️  HAProxy 7890 script not found"
-        fi
-        
-        # Đợi một chút để HAProxy khởi động
-        sleep 2
-        
         # Khởi động WebUI
         log "🌐 Starting Web UI..."
         if [ -f "$SCRIPT_DIR/start_webui_daemon.sh" ]; then
@@ -777,29 +762,6 @@ case "${1:-start}" in
             log "⚠️  Auto Credential Updater script not found"
         fi
         
-        # Khởi động HAProxy monitor
-        log "🛡️  Starting HAProxy Monitor..."
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/haproxy_monitor.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            chmod +x haproxy_monitor.sh
-            ./haproxy_monitor.sh start >> "$SCRIPT_DIR/logs/haproxy_monitor_launchd.log" 2>&1 || true
-            cd "$SCRIPT_DIR"
-            log "✅ HAProxy Monitor started"
-        else
-            log "⚠️  HAProxy Monitor script not found"
-        fi
-        
-        # Khởi động WARP monitor
-        log "🛡️  Starting WARP Monitor..."
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/warp_monitor.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            chmod +x warp_monitor.sh
-            ./warp_monitor.sh start >> "$SCRIPT_DIR/logs/warp_monitor_launchd.log" 2>&1 || true
-            cd "$SCRIPT_DIR"
-            log "✅ WARP Monitor started"
-        else
-            log "⚠️  WARP Monitor script not found"
-        fi
         
         # Khởi động Gost services
         log "🔐 Starting Gost Services..."
@@ -814,7 +776,17 @@ case "${1:-start}" in
         # Đợi một chút để Gost khởi động
         sleep 2
         
-        # Khởi động Gost Monitor
+        # Khởi động Gost 7890 Monitor (riêng cho port 7890)
+        log "🛡️  Starting Gost 7890 Monitor..."
+        if [ -f "$SCRIPT_DIR/gost_7890_monitor.sh" ]; then
+            chmod +x "$SCRIPT_DIR/gost_7890_monitor.sh"
+            "$SCRIPT_DIR/gost_7890_monitor.sh" start >> "$SCRIPT_DIR/logs/gost_7890_monitor.log" 2>&1 || true
+            log "✅ Gost 7890 Monitor started"
+        else
+            log "⚠️  Gost 7890 Monitor script not found"
+        fi
+        
+        # Khởi động Gost Monitor (cho các port khác, không bao gồm 7890)
         log "🛡️  Starting Gost Monitor..."
         if [ -f "$SCRIPT_DIR/gost_monitor.sh" ]; then
             chmod +x "$SCRIPT_DIR/gost_monitor.sh"
@@ -844,20 +816,6 @@ case "${1:-start}" in
             "$SCRIPT_DIR/manage_gost.sh" stop || true
         fi
         
-        # Stop WARP Monitor
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/warp_monitor.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            ./warp_monitor.sh stop || true
-            cd "$SCRIPT_DIR"
-        fi
-        
-        # Stop HAProxy Monitor
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/haproxy_monitor.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            ./haproxy_monitor.sh stop || true
-            cd "$SCRIPT_DIR"
-        fi
-        
         # Stop Auto Credential Updater
         if [ -f "$SCRIPT_DIR/start_auto_updater.sh" ]; then
             "$SCRIPT_DIR/start_auto_updater.sh" stop || true
@@ -873,13 +831,6 @@ case "${1:-start}" in
                 fi
                 rm -f "$PID_FILE"
             fi
-        fi
-        
-        # Stop HAProxy 7890
-        if [ -f "$SCRIPT_DIR/services/haproxy_7890/stop_haproxy_7890.sh" ]; then
-            cd "$SCRIPT_DIR/services/haproxy_7890"
-            ./stop_haproxy_7890.sh || true
-            cd "$SCRIPT_DIR"
         fi
         
         log "✅ All services stopped"
@@ -912,19 +863,6 @@ case "${1:-start}" in
         # Check Gost
         if [ -f "$SCRIPT_DIR/manage_gost.sh" ]; then
             "$SCRIPT_DIR/manage_gost.sh" status || true
-        fi
-        
-        # Check HAProxy 7890
-        PID_FILE="$SCRIPT_DIR/services/haproxy_7890/logs/haproxy_7890.pid"
-        if [ -f "$PID_FILE" ]; then
-            PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-            if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-                echo "✅ HAProxy 7890: Running (PID: $PID)"
-            else
-                echo "❌ HAProxy 7890: Not running"
-            fi
-        else
-            echo "❌ HAProxy 7890: Not running"
         fi
         
         echo ""
@@ -1193,22 +1131,6 @@ main() {
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "📊 Checking service status..."
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        
-        # Check HAProxy 7890
-        HAPROXY_PID_FILE="$HOME/mac_proxy/services/haproxy_7890/logs/haproxy_7890.pid"
-        if [ -f "$HAPROXY_PID_FILE" ]; then
-            HAPROXY_PID=$(cat "$HAPROXY_PID_FILE" 2>/dev/null || echo "")
-            if [ -n "$HAPROXY_PID" ] && kill -0 "$HAPROXY_PID" 2>/dev/null; then
-                echo "✅ HAProxy 7890: Running (PID: $HAPROXY_PID)"
-                echo "   Proxy: socks5://0.0.0.0:7890"
-            else
-                echo "❌ HAProxy 7890: Not running"
-                echo "   Try: cd $HOME/mac_proxy && ./launch_linux.sh start"
-            fi
-        else
-            echo "❌ HAProxy 7890: Not started"
-            echo "   Try: cd $HOME/mac_proxy && ./launch_linux.sh start"
-        fi
         
         # Check WARP
         if nc -z 127.0.0.1 8111 2>/dev/null; then

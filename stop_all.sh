@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # stop_all.sh
-# Dừng tất cả HAProxy và Wireproxy instances
+# Dừng tất cả Gost proxy services
 
 set -euo pipefail
 
@@ -27,18 +27,17 @@ echo ""
 #    ./stop_webui.sh
 #fi
 
-# Dừng WARP Monitor
-echo ""
-echo "🛑 Stopping WARP Monitor..."
-if [ -f "services/haproxy_7890/warp_monitor.sh" ]; then
-    cd services/haproxy_7890
-    ./warp_monitor.sh stop 2>/dev/null || true
-    cd ../..
-fi
 
 # Dừng Gost Monitor
 echo ""
 echo "🛑 Stopping Gost Monitor..."
+# Dừng Gost 7890 Monitor
+if [ -f "gost_7890_monitor.sh" ]; then
+    chmod +x gost_7890_monitor.sh
+    ./gost_7890_monitor.sh stop 2>/dev/null || true
+fi
+
+# Dừng Gost Monitor (cho các port khác)
 if [ -f "gost_monitor.sh" ]; then
     chmod +x gost_monitor.sh
     ./gost_monitor.sh stop 2>/dev/null || true
@@ -53,9 +52,6 @@ if [ -f "manage_gost.sh" ]; then
 fi
 
 
-# Health monitors removed - Gost runs directly
-
-# HAProxy removed - Gost now runs directly on public ports
 # Cleanup any remaining processes
 pkill -f "gost.*socks5" 2>/dev/null || true
 

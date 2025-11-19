@@ -30,9 +30,12 @@ if systemctl is-active --quiet auto-credential-updater.service 2>/dev/null; then
     systemctl stop auto-credential-updater.service || true
 fi
 
-# Copy service file
+# Copy service file và cập nhật đường dẫn
 echo "📋 Copy service file..."
-cp "$SERVICE_FILE" "$SYSTEMD_DIR/$SERVICE_NAME"
+TEMP_SERVICE="/tmp/${SERVICE_NAME}.tmp"
+sed "s|/project_proxy/mac_proxy|$SCRIPT_DIR|g" "$SERVICE_FILE" > "$TEMP_SERVICE"
+cp "$TEMP_SERVICE" "$SYSTEMD_DIR/$SERVICE_NAME"
+rm -f "$TEMP_SERVICE"
 
 # Reload systemd
 echo "🔄 Reload systemd daemon..."

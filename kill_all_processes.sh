@@ -50,28 +50,7 @@ pkill -9 -f "warp_monitor.sh" 2>/dev/null || true
 pkill -9 -f "bash.*warp_monitor" 2>/dev/null || true
 echo "✅ WARP Monitor killed"
 
-# 6. Kill HAProxy Monitor
-echo ""
-echo "📌 Killing HAProxy Monitor..."
-pkill -9 -f "haproxy_monitor.sh" 2>/dev/null || true
-pkill -9 -f "bash.*haproxy_monitor" 2>/dev/null || true
-echo "✅ HAProxy Monitor killed"
-
-# 7. Kill HAProxy 7890
-echo ""
-echo "📌 Killing HAProxy 7890..."
-pkill -9 -f "haproxy.*7890" 2>/dev/null || true
-# Kill process on port 7890
-if command -v lsof &> /dev/null; then
-    lsof -ti :7890 2>/dev/null | xargs kill -9 2>/dev/null || true
-elif command -v fuser &> /dev/null; then
-    fuser -k 7890/tcp 2>/dev/null || true
-elif command -v ss &> /dev/null; then
-    ss -lptn 'sport = :7890' | grep -oP 'pid=\K[0-9]+' | xargs kill -9 2>/dev/null || true
-fi
-echo "✅ HAProxy 7890 killed"
-
-# 8. Kill any remaining processes on common ports
+# 6. Kill any remaining processes on common ports
 echo ""
 echo "📌 Cleaning up ports 7891-7999..."
 for port in {7891..7999}; do
@@ -126,6 +105,6 @@ echo "✅ Kill operation completed"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📝 To check remaining processes:"
-echo "   ps aux | grep -E 'gost|app.py|monitor|auto_credential|haproxy'"
+echo "   ps aux | grep -E 'gost|app.py|monitor|auto_credential'"
 echo ""
 

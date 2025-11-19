@@ -36,7 +36,6 @@ else
     pkill -f "auto_credential_updater" 2>/dev/null || true
     pkill -f "warp_monitor" 2>/dev/null || true
     pkill -f "gost_monitor" 2>/dev/null || true
-    pkill -f "haproxy.*7890" 2>/dev/null || true
     sleep 2
 fi
 

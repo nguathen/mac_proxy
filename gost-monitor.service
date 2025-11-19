@@ -1,0 +1,19 @@
+[Unit]
+Description=Gost Monitor Service
+After=network.target
+
+[Service]
+Type=forking
+User=root
+WorkingDirectory=/project_proxy/mac_proxy
+ExecStart=/bin/bash /project_proxy/mac_proxy/gost_monitor.sh start
+ExecStop=/bin/bash /project_proxy/mac_proxy/gost_monitor.sh stop
+PIDFile=/project_proxy/mac_proxy/logs/gost_monitor.pid
+Restart=always
+RestartSec=10
+StandardOutput=append:/project_proxy/mac_proxy/logs/gost_monitor_systemd.log
+StandardError=append:/project_proxy/mac_proxy/logs/gost_monitor_systemd.error.log
+
+[Install]
+WantedBy=multi-user.target
+

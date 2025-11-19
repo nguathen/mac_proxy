@@ -1152,7 +1152,7 @@
         }
         
         async function clearAllServices() {
-            if (!confirm(`🧹 Clear All Services\n\nThis will:\n- Stop ALL Gost services\n- Delete ALL Gost configs and logs\n\n⚠️ This action cannot be undone!\n\nAre you sure you want to continue?`)) {
+            if (!confirm(`🧹 Clear All Services\n\nThis will:\n- Stop ALL Gost services (except port 7890)\n- Delete ALL Gost configs and logs (except port 7890)\n\n🛡️ Port 7890 (WARP service) will be protected\n\n⚠️ This action cannot be undone!\n\nAre you sure you want to continue?`)) {
                 return;
             }
             

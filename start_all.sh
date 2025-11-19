@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # start_all.sh
-# Khởi động wireproxy và HAProxy
+# Khởi động Gost proxy services
 
 set -euo pipefail
 
@@ -19,6 +19,25 @@ if ! command -v gost &> /dev/null; then
     echo "❌ Gost chưa được cài đặt"
     echo "   Chạy: brew install gost"
     exit 1
+fi
+
+# Đảm bảo config cho port 7890 tồn tại (WARP service)
+echo ""
+echo "🛡️  Ensuring Gost 7890 config exists..."
+mkdir -p config
+if [ ! -f "config/gost_7890.config" ]; then
+    cat > config/gost_7890.config <<EOF
+{
+    "port": "7890",
+    "provider": "warp",
+    "country": "cloudflare",
+    "proxy_url": "socks5://127.0.0.1:8111",
+    "proxy_host": "127.0.0.1",
+    "proxy_port": "8111",
+    "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+    echo "✅ Gost 7890 config created"
 fi
 
 # Khởi động Gost
@@ -49,8 +68,6 @@ else
     echo "✅ Cloudflare WARP proxy đang chạy (port 8111)"
 fi
 
-# HAProxy removed - Gost now runs directly on public ports (7891-7999)
-
 # Khởi động Auto Credential Updater
 echo ""
 echo "🔄 Starting Auto Credential Updater..."
@@ -63,20 +80,18 @@ echo "🌐 Starting Web UI..."
 chmod +x start_webui_daemon.sh
 ./start_webui_daemon.sh
 
-# Khởi động WARP monitor cho HAProxy 7890
-echo ""
-echo "🛡️  Starting WARP Monitor..."
-if [ -f "services/haproxy_7890/warp_monitor.sh" ]; then
-    cd services/haproxy_7890
-    chmod +x warp_monitor.sh
-    ./warp_monitor.sh start 2>/dev/null || true
-    cd ../..
-    echo "✅ WARP Monitor started"
-else
-    echo "⚠️  WARP Monitor script not found"
-fi
 
 # Khởi động Gost Monitor
+echo ""
+echo "🛡️  Starting Gost 7890 Monitor..."
+if [ -f "gost_7890_monitor.sh" ]; then
+    chmod +x gost_7890_monitor.sh
+    ./gost_7890_monitor.sh start 2>/dev/null || true
+    echo "✅ Gost 7890 Monitor started"
+else
+    echo "⚠️  Gost 7890 Monitor script not found"
+fi
+
 echo ""
 echo "🛡️  Starting Gost Monitor..."
 if [ -f "gost_monitor.sh" ]; then
@@ -109,11 +124,6 @@ echo "🔄 Auto Credential Updater:"
 echo "   • Tự động cập nhật credentials mỗi 30 giây"
 echo "   • Tự động dọn dẹp services không sử dụng mỗi 5 phút"
 echo "   • Log: logs/auto_updater.log"
-echo ""
-echo "🛡️  WARP Monitor:"
-echo "   • Tự động kiểm tra và reconnect WARP nếu cần"
-echo "   • Check interval: 30 giây"
-echo "   • Log: services/haproxy_7890/logs/warp_monitor.log"
 echo ""
 echo "🛡️  Gost Monitor:"
 echo "   • Tự động kiểm tra và restart gost khi connection fail"

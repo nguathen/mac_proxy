@@ -1,0 +1,21 @@
+[Unit]
+Description=Mac Proxy System - Gost Proxy Services
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+WorkingDirectory=/project_proxy/mac_proxy
+ExecStart=/bin/bash /project_proxy/mac_proxy/start_all_delayed.sh
+StandardOutput=append:/project_proxy/mac_proxy/logs/systemd.log
+StandardError=append:/project_proxy/mac_proxy/logs/systemd.error.log
+
+# Restart on failure
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+

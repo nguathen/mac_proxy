@@ -176,13 +176,23 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
             
             # Determine which case we're handling
             if country_code and not proxy_host and not proxy_port:
-                # Case 1: Only country_code provided - get random server from country
-                servers = protonvpn_api.get_servers_by_country(country_code)
-                if not servers:
-                    return jsonify({'success': False, 'error': f'No servers found for country {country_code}'}), 404
-                
-                import random
-                server = random.choice(servers)
+                # Case 1: Only country_code provided - get best server from country (tối ưu)
+                # Sử dụng get_best_server để chọn server tốt nhất thay vì random
+                server = protonvpn_api.get_best_server(country_code=country_code)
+                if not server:
+                    # Fallback: lấy danh sách servers và chọn tốt nhất
+                    servers = protonvpn_api.get_servers_by_country(country_code)
+                    if not servers:
+                        return jsonify({'success': False, 'error': f'No servers found for country {country_code}'}), 404
+                    
+                    # Filter và sắp xếp servers theo load và score
+                    online_servers = [s for s in servers if s.get('status') == 'online']
+                    if not online_servers:
+                        online_servers = servers
+                    
+                    online_servers.sort(key=lambda x: (x.get('load', 100), -x.get('score', 0)))
+                    server = online_servers[0]
+                    print(f"✅ Selected best server for {country_code}: {server.get('domain', 'unknown')} (load: {server.get('load', 'N/A')}, score: {server.get('score', 'N/A')})")
                 proxy_host = server.get('domain', '')
                 # Calculate proxy port from label
                 proxy_port = 4443
@@ -266,8 +276,26 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                     print("Warning: All servers are in use, selecting from all servers")
                     available_servers = all_servers
                 
-                import random
-                server = random.choice(available_servers)
+                # Tối ưu: Chọn server tốt nhất dựa trên load và score thay vì random
+                # Ưu tiên server có load thấp nhất và score cao nhất
+                if available_servers:
+                    # Filter chỉ lấy servers online
+                    online_servers = [s for s in available_servers if s.get('status') == 'online']
+                    if not online_servers:
+                        online_servers = available_servers  # Fallback nếu không có online
+                    
+                    # Sắp xếp theo load thấp nhất, nếu load bằng nhau thì theo score cao nhất
+                    online_servers.sort(key=lambda x: (
+                        x.get('load', 100),  # Load thấp nhất trước
+                        -x.get('score', 0)   # Score cao nhất sau
+                    ))
+                    
+                    # Chọn server tốt nhất (load thấp nhất, score cao nhất)
+                    server = online_servers[0]
+                    print(f"✅ Selected best server: {server.get('domain', 'unknown')} (load: {server.get('load', 'N/A')}, score: {server.get('score', 'N/A')})")
+                else:
+                    import random
+                    server = random.choice(available_servers)
                 proxy_host = server.get('domain', '')
                 # Calculate proxy port from label
                 proxy_port = 4443

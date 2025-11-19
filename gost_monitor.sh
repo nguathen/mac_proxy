@@ -46,12 +46,23 @@ check_gost_process() {
 check_gost_proxy() {
     local port=$1
     
-    # Kiểm tra proxy có hoạt động không (với timeout ngắn)
-    # macOS không có timeout command, dùng curl với timeout options
-    if curl -s --connect-timeout 5 --max-time 8 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
-        return 0  # Working
+    # Port 7890 (WARP) cần timeout dài hơn vì forward qua WARP có thể chậm hơn
+    if [ "$port" = "7890" ]; then
+        # Timeout dài hơn cho WARP: connect-timeout 10s, max-time 15s
+        if curl -s --connect-timeout 10 --max-time 15 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
+            return 0  # Working
+        else
+            return 1  # Not working
+        fi
     else
-        return 1  # Not working
+        # Kiểm tra proxy có hoạt động không (với timeout tối ưu cho ProtonVPN)
+        # Tăng timeout lên để phù hợp với ProtonVPN (có thể chậm hơn do distance)
+        # Dùng curl với timeout options: connect-timeout 8s, max-time 12s
+        if curl -s --connect-timeout 8 --max-time 12 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
+            return 0  # Working
+        else
+            return 1  # Not working
+        fi
     fi
 }
 
@@ -109,7 +120,10 @@ get_gost_ports() {
         if [ -f "$config_file" ]; then
             local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
             if [ -n "$port" ]; then
-                ports="$ports $port"
+                # Loại bỏ port 7890 vì có monitor riêng (gost_7890_monitor.sh)
+                if [ "$port" != "7890" ]; then
+                    ports="$ports $port"
+                fi
             fi
         fi
     done
@@ -151,6 +165,10 @@ monitor_loop() {
         for port in $current_ports; do
             # Skip nếu port rỗng
             if [ -z "$port" ]; then
+                continue
+            fi
+            # Double check: không bao giờ monitor port 7890 (có monitor riêng)
+            if [ "$port" = "7890" ]; then
                 continue
             fi
             # Sử dụng file để lưu trữ failure count và last restart time

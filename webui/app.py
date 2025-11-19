@@ -11,6 +11,7 @@ import re
 import json
 import sys
 import requests
+import socket
 from datetime import datetime
 
 # Add parent directory to path to import modules
@@ -91,10 +92,6 @@ def run_command(cmd, cwd=BASE_DIR, timeout=60):
             'returncode': -1
         }
 
-def get_available_haproxy_ports():
-    """Deprecated - kept for API compatibility with chrome_handler"""
-    # HAProxy removed - Gost now runs directly on public ports (7891-7999)
-    return []
 
 def get_available_gost_ports():
     """Dynamically scan for available gost ports from config files"""
@@ -239,7 +236,7 @@ def get_protonvpn_proxy_with_server(server):
 
 def trigger_health_check():
     """Deprecated - kept for API compatibility with VPN handlers"""
-    # HAProxy health checks removed - Gost runs directly
+    # Legacy function - Gost runs directly without separate health checks
     pass
 
 @app.route('/')
@@ -268,15 +265,42 @@ def api_status():
                             pid = f.read().strip()
                         if pid:
                             # Kiểm tra process có đang chạy không
-                            import subprocess
                             result = subprocess.run(['ps', '-p', pid], capture_output=True, text=True)
                             running = result.returncode == 0
+                    except:
+                        pass
+                
+                # Fallback: kiểm tra port có đang listen không (cho port 7890)
+                # Port 7890 chỉ được sử dụng bởi Gost
+                if port == '7890' and not running:
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(1)
+                        result = sock.connect_ex(('127.0.0.1', int(port)))
+                        sock.close()
+                        if result == 0:
+                            # Port đang listen, tìm PID của process đang sử dụng port
+                            try:
+                                lsof_result = subprocess.run(['lsof', '-ti', f':{port}'], capture_output=True, text=True)
+                                if lsof_result.returncode == 0 and lsof_result.stdout.strip():
+                                    port_pid = lsof_result.stdout.strip().split('\n')[0]
+                                    # Kiểm tra process có đang chạy không (chỉ chấp nhận gost)
+                                    ps_result = subprocess.run(['ps', '-p', port_pid, '-o', 'comm='], capture_output=True, text=True)
+                                    if ps_result.returncode == 0 and ps_result.stdout.strip():
+                                        proc_name = ps_result.stdout.strip().lower()
+                                        # Chỉ chấp nhận gost (HAProxy đã được loại bỏ)
+                                        if 'gost' in proc_name:
+                                            running = True
+                                            pid = port_pid
+                            except:
+                                pass
                     except:
                         pass
                 
                 # Lấy thông tin server từ config
                 server_info = None
                 try:
+                    # Lấy từ Gost config
                     config_path = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
                     if os.path.exists(config_path):
                         import json
@@ -290,6 +314,9 @@ def api_status():
                             if server_name and port_match:
                                 server_port = port_match.group(1)
                                 server_info = f"{server_name}:{server_port}"
+                            elif port == '7890' and not server_info:
+                                # Fallback cho port 7890: Gost forward đến WARP trên 8111
+                                server_info = "cloudflare:8111"
                 except:
                     pass
                 
@@ -325,10 +352,8 @@ def api_status():
         except:
             pass
         
-        # HAProxy removed - Gost now runs directly on public ports
         return jsonify({
             'gost': gost_services,
-            'haproxy': [],  # HAProxy no longer used
             'monitor': {
                 'running': monitor_running,
                 'pid': monitor_pid if monitor_running else None
@@ -339,7 +364,6 @@ def api_status():
         return jsonify({
             'error': str(e),
             'gost': [],
-            'haproxy': [],  # Deprecated - kept for API compatibility
             'monitor': {
                 'running': False,
                 'pid': None
@@ -477,21 +501,42 @@ def api_logs(service):
 
 @app.route('/api/clear-all', methods=['POST'])
 def api_clear_all():
-    """Clear all Gost services"""
+    """Clear all Gost services (except port 7890)"""
     try:
         stopped_services = []
         deleted_files = []
+        protected_port = 7890  # Port 7890 được bảo vệ, không bị clear
         
         # Get all available ports
         gost_ports = get_available_gost_ports()
         
+        # Loại bỏ port 7890 khỏi danh sách ports cần clear
+        # Convert port sang int để so sánh đúng (vì get_available_gost_ports() trả về string)
+        gost_ports_to_clear = [port for port in gost_ports if int(port) != protected_port]
+        
         print(f"🧹 Starting Clear All operation...")
         print(f"Found {len(gost_ports)} Gost ports: {gost_ports}")
+        print(f"🛡️  Protecting port {protected_port} (WARP service)")
+        print(f"Will clear {len(gost_ports_to_clear)} ports: {gost_ports_to_clear}")
         
-        # 1. Stop all Gost services
-        for port in gost_ports:
+        # 1. Stop all Gost services (except port 7890)
+        for port in gost_ports_to_clear:
+            # Double check: không bao giờ stop port 7890
+            try:
+                port_int = int(port)
+                if port_int == protected_port:
+                    print(f"🛡️  Skipping protected port {port} (double check)")
+                    continue
+            except (ValueError, TypeError):
+                pass
+                
             try:
                 pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
+                # Triple check: không bao giờ xử lý PID file của port 7890
+                if f'gost_{protected_port}' in pid_file:
+                    print(f"🛡️  Skipping protected PID file: {pid_file}")
+                    continue
+                    
                 if os.path.exists(pid_file):
                     try:
                         with open(pid_file) as f:
@@ -509,21 +554,54 @@ def api_clear_all():
             except Exception as e:
                 print(f"⚠️  Error stopping Gost {port}: {e}")
         
-        # 2. Force kill any remaining processes
+        # 2. Force kill any remaining processes (except port 7890)
         try:
             import subprocess
             
-            # Kill any remaining gost processes
-            result = subprocess.run(['pkill', '-f', 'gost'], capture_output=True, text=True)
-            if result.returncode == 0:
-                stopped_services.append("Remaining Gost processes")
-                print("✓ Force killed remaining Gost processes")
+            # Kill các gost processes khác (không phải port 7890)
+            # Tìm và kill từng process cụ thể để tránh kill nhầm port 7890
+            result = subprocess.run(['pgrep', '-f', 'gost.*-L.*socks5://:'], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        pid_int = int(pid.strip())
+                        # Kiểm tra xem process này có phải port 7890 không
+                        cmdline_file = f'/proc/{pid_int}/cmdline'
+                        if os.path.exists(cmdline_file):
+                            with open(cmdline_file, 'r') as f:
+                                cmdline = f.read()
+                            # Chỉ kill nếu không phải port 7890 - kiểm tra cả ':7890' và '7890' để chắc chắn
+                            if ':7890' not in cmdline and 'socks5://:7890' not in cmdline:
+                                os.kill(pid_int, 15)
+                                stopped_services.append(f"Gost process {pid_int}")
+                        else:
+                            # Nếu không đọc được cmdline, dùng ps để kiểm tra
+                            ps_result = subprocess.run(['ps', '-p', str(pid_int), '-o', 'command='], capture_output=True, text=True)
+                            if ps_result.returncode == 0:
+                                cmdline = ps_result.stdout.strip()
+                                # Chỉ kill nếu không phải port 7890
+                                if ':7890' not in cmdline and 'socks5://:7890' not in cmdline:
+                                    os.kill(pid_int, 15)
+                                    stopped_services.append(f"Gost process {pid_int}")
+                    except (OSError, ValueError, TypeError) as e:
+                        print(f"⚠️  Error checking process {pid}: {e}")
+                        pass
                 
         except Exception as e:
             print(f"⚠️  Error force killing processes: {e}")
         
-        # 3. Delete all Gost configs and logs
-        for port in gost_ports:
+        # 3. Delete all Gost configs and logs (except port 7890)
+        for port in gost_ports_to_clear:
+            # Double check: không bao giờ xóa port 7890
+            try:
+                port_int = int(port)
+                if port_int == protected_port:
+                    print(f"🛡️  Skipping protected port {port} (double check)")
+                    continue
+            except (ValueError, TypeError):
+                pass
+            
             files_to_remove = [
                 (os.path.join(BASE_DIR, 'config', f'gost_{port}.config'), f'Gost config {port}'),
                 (os.path.join(LOG_DIR, f'gost_{port}.log'), f'Gost log {port}'),
@@ -531,6 +609,11 @@ def api_clear_all():
             ]
             
             for file_path, description in files_to_remove:
+                # Triple check: không bao giờ xóa file của port 7890
+                if f'gost_{protected_port}' in file_path:
+                    print(f"🛡️  Skipping protected file: {file_path}")
+                    continue
+                    
                 if os.path.exists(file_path):
                     try:
                         os.remove(file_path)
@@ -544,11 +627,17 @@ def api_clear_all():
         time.sleep(2)
         
         
+        message = f'All services cleared successfully! Stopped {len(stopped_services)} services and deleted {len(deleted_files)} files.'
+        # Kiểm tra xem port 7890 có trong danh sách không (so sánh string)
+        if str(protected_port) in gost_ports:
+            message += f' (Port {protected_port} was protected and not cleared)'
+        
         return jsonify({
             'success': True,
-            'message': f'All services cleared successfully! Stopped {len(stopped_services)} services and deleted {len(deleted_files)} files.',
+            'message': message,
             'stopped_services': stopped_services,
-            'deleted_files': deleted_files
+            'deleted_files': deleted_files,
+            'protected_port': protected_port
         })
         
     except Exception as e:
@@ -641,9 +730,7 @@ def api_monitor_action(action):
 register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_check, nordvpn_api, proxy_api)
 register_protonvpn_routes(app, save_gost_config, run_command, trigger_health_check, protonvpn_api, proxy_api)
 register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, parse_gost_config, is_valid_gost_port, get_available_gost_ports)
-# HAProxy routes removed - Gost now runs directly on public ports (7891-7999)
-# register_haproxy_routes(app, BASE_DIR, LOG_DIR, run_command, get_available_haproxy_ports, get_available_gost_ports)
-register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port)
+register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_port)
 
 if __name__ == '__main__':
     # Tạo thư mục logs nếu chưa có

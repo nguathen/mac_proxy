@@ -70,6 +70,9 @@ class AutoCredentialUpdater:
         last_cleanup = 0
         while self.running:
             try:
+                # Đảm bảo config cho port 7890 luôn tồn tại (tự động tạo lại nếu bị mất)
+                self._ensure_gost_7890_config()
+                
                 # Check credentials every 30 seconds
                 self._check_and_update_credentials()
                 
@@ -84,6 +87,27 @@ class AutoCredentialUpdater:
                 print(f"❌ Error in monitor loop: {e}")
                 time.sleep(60)  # Wait longer on error
                 
+    def _ensure_gost_7890_config(self):
+        """Đảm bảo config cho port 7890 luôn tồn tại (tự động tạo lại nếu bị mất)"""
+        try:
+            gost_7890_config = os.path.join(self.config_dir, "gost_7890.config")
+            if not os.path.exists(gost_7890_config):
+                print(f"🛡️  Port 7890 config missing, recreating...")
+                config_data = {
+                    "port": "7890",
+                    "provider": "warp",
+                    "country": "cloudflare",
+                    "proxy_url": "socks5://127.0.0.1:8111",
+                    "proxy_host": "127.0.0.1",
+                    "proxy_port": "8111",
+                    "created_at": datetime.now().isoformat() + 'Z'
+                }
+                with open(gost_7890_config, 'w') as f:
+                    json.dump(config_data, f, indent=2)
+                print(f"✅ Port 7890 config recreated")
+        except Exception as e:
+            print(f"⚠️  Error ensuring gost 7890 config: {e}")
+    
     def _check_and_update_credentials(self):
         """Kiểm tra và cập nhật credentials nếu cần"""
         # Tìm tất cả ProtonVPN config files
@@ -310,7 +334,6 @@ class AutoCredentialUpdater:
             
             # Tìm và dọn dẹp các service không sử dụng
             self._cleanup_unused_gost_services(used_ports)
-            self._cleanup_unused_haproxy_services(used_ports)
             
         except Exception as e:
             print(f"❌ Error in cleanup unused services: {e}")
@@ -345,35 +368,21 @@ class AutoCredentialUpdater:
                     try:
                         gost_port = int(port_str)
                         
-                        # Kiểm tra xem Gost này có thuộc về HAProxy đang được sử dụng không
-                        # Mapping: haproxy_port = 7891 + (gost_port - 18181)
-                        haproxy_port = 7891 + (gost_port - 18181)
-                        
-                        # Kiểm tra xem HAProxy tương ứng có tồn tại không
-                        haproxy_config_exists = os.path.exists(os.path.join(self.config_dir, f"haproxy_{haproxy_port}.cfg"))
+                        # Bỏ qua port 7890 vì đây là Gost độc lập cho Cloudflare WARP
+                        if gost_port == 7890:
+                            print(f"🛡️  Protecting Gost 7890 (Cloudflare WARP service)")
+                            continue
                         
                         # Nếu Gost port trực tiếp được sử dụng, không xóa
                         if gost_port in used_ports:
                             print(f"🛡️  Protecting Gost {gost_port} (directly used)")
                             continue
                         
-                        # Nếu HAProxy port này đang được sử dụng, thì không xóa Gost (bảo vệ cả khi không có HAProxy config)
-                        if haproxy_port in used_ports:
-                            print(f"🛡️  Protecting Gost {gost_port} (belongs to active HAProxy port {haproxy_port})")
-                            continue
-                        
-                        # Nếu HAProxy không tồn tại và không được sử dụng, Gost bị orphaned - xóa ngay lập tức
-                        if not haproxy_config_exists:
-                            print(f"🔍 Gost {gost_port} orphaned (HAProxy {haproxy_port} config missing and not used)")
-                            print(f"🧹 Cleaning up orphaned Gost service on port {gost_port}")
-                            self._stop_and_remove_gost_service(gost_port)
-                            continue
-                        
-                        # Kiểm tra thời gian tạo trước khi xóa (chỉ cho Gost không orphaned)
+                        # Kiểm tra thời gian tạo trước khi xóa
                         if not self._should_cleanup_service(gost_port, "gost"):
                             continue
                             
-                        # Nếu không thuộc về HAProxy đang sử dụng và không được sử dụng trực tiếp
+                        # Nếu không được sử dụng, xóa Gost service
                         print(f"🧹 Cleaning up unused Gost service on port {gost_port}")
                         self._stop_and_remove_gost_service(gost_port)
                         
@@ -382,39 +391,14 @@ class AutoCredentialUpdater:
         except Exception as e:
             print(f"❌ Error cleaning up Gost services: {e}")
             
-    def _cleanup_unused_haproxy_services(self, used_ports):
-        """Dọn dẹp HAProxy services không sử dụng"""
-        try:
-            # Protected ports - không bao giờ bị cleanup (port 7890 là Cloudflare WARP service)
-            protected_ports = {7890}
-            
-            # Tìm tất cả HAProxy config files
-            for filename in os.listdir(self.config_dir):
-                if filename.startswith("haproxy_") and filename.endswith(".cfg"):
-                    port_str = filename[8:-4]  # Remove "haproxy_" and ".cfg"
-                    try:
-                        port = int(port_str)
-                        
-                        # Bảo vệ port 7890 và các port được bảo vệ
-                        if port in protected_ports:
-                            print(f"🛡️  Protecting HAProxy service on port {port} (protected port)")
-                            continue
-                        
-                        if port not in used_ports:
-                            # Kiểm tra thời gian tạo trước khi xóa
-                            if not self._should_cleanup_service(port, "haproxy"):
-                                continue
-                                
-                            print(f"🧹 Cleaning up unused HAProxy service on port {port}")
-                            self._stop_and_remove_haproxy_service(port)
-                    except ValueError:
-                        continue
-        except Exception as e:
-            print(f"❌ Error cleaning up HAProxy services: {e}")
-            
     def _stop_and_remove_gost_service(self, port):
         """Dừng và xóa Gost service"""
         try:
+            # Bảo vệ tuyệt đối: không bao giờ xóa port 7890 (WARP service)
+            if port == 7890:
+                print(f"🛡️  Cannot remove protected Gost service on port {port} (WARP service)")
+                return
+            
             # Stop gost process
             pid_file = os.path.join(self.log_dir, f"gost_{port}.pid")
             if os.path.exists(pid_file):
@@ -433,8 +417,11 @@ class AutoCredentialUpdater:
             except:
                 pass
             
-            # Remove config file
+            # Remove config file (double check: không bao giờ xóa port 7890)
             config_file = os.path.join(self.config_dir, f"gost_{port}.config")
+            if port == 7890:
+                print(f"🛡️  Cannot remove protected config file for port {port}")
+                return
             if os.path.exists(config_file):
                 os.remove(config_file)
                 print(f"✅ Removed Gost config for port {port}")
@@ -453,62 +440,6 @@ class AutoCredentialUpdater:
         except Exception as e:
             print(f"❌ Error stopping Gost service on port {port}: {e}")
             
-    def _stop_and_remove_haproxy_service(self, port):
-        """Dừng và xóa HAProxy service"""
-        try:
-            # Protected ports - không bao giờ bị dừng (port 7890 là Cloudflare WARP service)
-            protected_ports = {7890}
-            if port in protected_ports:
-                print(f"🛡️  Cannot stop protected HAProxy service on port {port}")
-                return
-            
-            # Stop HAProxy process
-            pid_file = os.path.join(self.log_dir, f"haproxy_{port}.pid")
-            if os.path.exists(pid_file):
-                try:
-                    with open(pid_file, 'r') as f:
-                        pid = int(f.read().strip())
-                    os.kill(pid, 15)  # SIGTERM
-                    print(f"✅ Stopped HAProxy process {pid} on port {port}")
-                except (OSError, ValueError):
-                    pass
-                finally:
-                    os.remove(pid_file)
-            
-            # Stop health monitor
-            health_pid_file = os.path.join(self.log_dir, f"health_{port}.pid")
-            if os.path.exists(health_pid_file):
-                try:
-                    with open(health_pid_file, 'r') as f:
-                        pid = int(f.read().strip())
-                    os.kill(pid, 15)  # SIGTERM
-                    print(f"✅ Stopped health monitor {pid} for port {port}")
-                except (OSError, ValueError):
-                    pass
-                finally:
-                    os.remove(health_pid_file)
-            
-            # Remove config file
-            config_file = os.path.join(self.config_dir, f"haproxy_{port}.cfg")
-            if os.path.exists(config_file):
-                os.remove(config_file)
-                print(f"✅ Removed HAProxy config for port {port}")
-                
-            # Remove log files
-            log_files = [
-                os.path.join(self.log_dir, f"haproxy_{port}.log"),
-                os.path.join(self.log_dir, f"haproxy_health_{port}.log"),
-                os.path.join(self.log_dir, f"last_backend_{port}")
-            ]
-            for log_file in log_files:
-                if os.path.exists(log_file):
-                    os.remove(log_file)
-                    
-            print(f"✅ Cleaned up HAProxy service on port {port}")
-            
-        except Exception as e:
-            print(f"❌ Error stopping HAProxy service on port {port}: {e}")
-
     def manual_update_all(self):
         """Cập nhật thủ công tất cả ProtonVPN credentials"""
         print("🔄 Manual update all ProtonVPN credentials...")
@@ -526,6 +457,11 @@ class AutoCredentialUpdater:
     def _should_cleanup_service(self, port, service_type):
         """Kiểm tra xem có nên cleanup service này không dựa trên thời gian tạo"""
         try:
+            # Bảo vệ tuyệt đối: không bao giờ cleanup port 7890 (WARP service)
+            if port == 7890:
+                print(f"🛡️  Cannot cleanup protected service on port {port} (WARP service)")
+                return False
+            
             # Thời gian tối thiểu để service được coi là "cũ" (5 phút)
             MIN_AGE_MINUTES = 5
             min_age_seconds = MIN_AGE_MINUTES * 60
@@ -533,8 +469,6 @@ class AutoCredentialUpdater:
             # Lấy thời gian tạo của config file
             if service_type == "gost":
                 config_file = os.path.join(self.config_dir, f"gost_{port}.config")
-            elif service_type == "haproxy":
-                config_file = os.path.join(self.config_dir, f"haproxy_{port}.cfg")
             else:
                 return True  # Nếu không xác định được type, cho phép cleanup
             

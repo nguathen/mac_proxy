@@ -5,7 +5,7 @@
 set -euo pipefail
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📊 HAProxy Multi-Instance System Status"
+echo "📊 Gost Proxy System Status"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Kiểm tra Auto Credential Updater
@@ -18,32 +18,22 @@ else
     echo "  ❌ Auto updater script not found"
 fi
 
-# Kiểm tra HAProxy processes
+# Kiểm tra Gost instances
 echo ""
-echo "🔧 HAProxy Instances:"
-for pid_file in logs/haproxy_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
-        pid=$(cat "$pid_file")
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "  ✅ Instance on port $port: Running (PID $pid)"
+echo "🔐 Gost Instances:"
+for config_file in config/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        port=$(basename "$config_file" .config | sed 's/gost_//')
+        pid_file="logs/gost_${port}.pid"
+        if [ -f "$pid_file" ]; then
+            pid=$(cat "$pid_file")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "  ✅ Instance on port $port: Running (PID $pid)"
+            else
+                echo "  ❌ Instance on port $port: Dead (stale PID file)"
+            fi
         else
-            echo "  ❌ Instance on port $port: Dead (stale PID file)"
-        fi
-    fi
-done
-
-# Kiểm tra health monitors
-echo ""
-echo "🩺 Health Monitors:"
-for pid_file in logs/health_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/health_//')
-        pid=$(cat "$pid_file")
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "  ✅ Monitor for port $port: Running (PID $pid)"
-        else
-            echo "  ❌ Monitor for port $port: Dead (stale PID file)"
+            echo "  ❌ Instance on port $port: Not running"
         fi
     fi
 done
@@ -51,45 +41,16 @@ done
 # Kiểm tra listening ports
 echo ""
 echo "🔌 Listening Ports:"
-# Kiểm tra HAProxy ports và stats ports
-for pid_file in logs/haproxy_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
-        stats_port=$((port + 200))
-        
-        # Kiểm tra HAProxy port
+for config_file in config/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        port=$(basename "$config_file" .config | sed 's/gost_//')
         if lsof -i :$port > /dev/null 2>&1 || nc -z 127.0.0.1 $port 2>/dev/null; then
-            echo "  ✅ HAProxy port $port: Listening"
+            echo "  ✅ Gost port $port: Listening"
         else
-            echo "  ❌ HAProxy port $port: Not listening"
-        fi
-        
-        # Kiểm tra stats port
-        if lsof -i :$stats_port > /dev/null 2>&1 || nc -z 127.0.0.1 $stats_port 2>/dev/null; then
-            echo "  ✅ Stats port $stats_port: Listening"
-        else
-            echo "  ❌ Stats port $stats_port: Not listening"
+            echo "  ❌ Gost port $port: Not listening"
         fi
     fi
 done
-
-# Kiểm tra gost backends
-echo ""
-echo "🔐 Gost Backends:"
-for port in 18181 18182 18183 18184 18185 18186 18187; do
-    if nc -z 127.0.0.1 $port 2>/dev/null; then
-        # Test với curl
-        ip=$(curl -s --max-time 5 -x socks5h://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
-        if [ "$ip" != "N/A" ]; then
-            echo "  ✅ Gost port $port: Online (IP: $ip)"
-        else
-            echo "  ⚠️  Gost port $port: Port open but not responding"
-        fi
-    else
-        echo "  ❌ Gost port $port: Offline"
-    fi
-done
-
 
 # Kiểm tra Cloudflare WARP
 echo ""
@@ -105,47 +66,41 @@ else
     echo "  ❌ WARP proxy (port 8111): Offline"
 fi
 
-# Test HAProxy endpoints
+# Test Gost endpoints
 echo ""
-echo "🧪 HAProxy Endpoint Tests:"
-for pid_file in logs/haproxy_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
+echo "🧪 Gost Endpoint Tests:"
+for config_file in config/gost_*.config; do
+    if [ -f "$config_file" ]; then
+        port=$(basename "$config_file" .config | sed 's/gost_//')
         if nc -z 127.0.0.1 $port 2>/dev/null; then
             ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
             if [ "$ip" != "N/A" ]; then
-                echo "  ✅ HAProxy port $port: Working (IP: $ip)"
+                echo "  ✅ Gost port $port: Working (IP: $ip)"
             else
-                echo "  ⚠️  HAProxy port $port: Port open but proxy not working"
+                echo "  ⚠️  Gost port $port: Port open but proxy not working"
             fi
         else
-            echo "  ❌ HAProxy port $port: Not accessible"
+            echo "  ❌ Gost port $port: Not accessible"
         fi
     fi
 done
 
 # Recent logs
 echo ""
-echo "📝 Recent Health Monitor Logs:"
-for log_file in logs/haproxy_health_*.log; do
-    if [ -f "$log_file" ]; then
-        port=$(basename "$log_file" .log | sed 's/haproxy_health_//')
-        echo ""
-        echo "  Instance $port (last 3 lines):"
-        tail -n 3 "$log_file" | sed 's/^/    /'
-    fi
-done
+echo "📝 Recent Gost Monitor Logs:"
+if [ -f "logs/gost_monitor.log" ]; then
+    echo ""
+    echo "  Gost Monitor (last 5 lines):"
+    tail -n 5 "logs/gost_monitor.log" | sed 's/^/    /'
+fi
+
+if [ -f "logs/gost_7890_monitor.log" ]; then
+    echo ""
+    echo "  Gost 7890 Monitor (last 5 lines):"
+    tail -n 5 "logs/gost_7890_monitor.log" | sed 's/^/    /'
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📈 Stats URLs:"
-for pid_file in logs/haproxy_*.pid; do
-    if [ -f "$pid_file" ]; then
-        port=$(basename "$pid_file" .pid | sed 's/haproxy_//')
-        stats_port=$((port + 200))
-        echo "   • Instance $port: http://127.0.0.1:$stats_port/haproxy?stats"
-    fi
-done
-echo "   • Auth: admin:admin123"
+echo "🌐 Web UI: http://127.0.0.1:5000"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-

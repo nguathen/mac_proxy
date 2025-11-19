@@ -141,10 +141,10 @@ check_and_kill_port() {
     
     log "🔍 Checking port $port..."
     
-    # Tìm process đang sử dụng port (macOS/Linux compatible)
+    # Tìm process đang sử dụng port
     local pids=""
     
-    # Try lsof first (macOS/Linux)
+    # Try lsof first
     if command -v lsof &> /dev/null; then
         pids=$(lsof -ti :$port 2>/dev/null || echo "")
     fi
@@ -182,6 +182,25 @@ check_and_kill_port() {
 
 start_gost() {
     log "🚀 Starting gost services..."
+    
+    # Tự động tạo lại config cho port 7890 nếu bị mất (WARP service)
+    local gost_7890_config="$CONFIG_DIR/gost_7890.config"
+    if [ ! -f "$gost_7890_config" ]; then
+        log "🛡️  Port 7890 config missing, recreating..."
+        mkdir -p "$CONFIG_DIR"
+        cat > "$gost_7890_config" <<EOF
+{
+    "port": "7890",
+    "provider": "warp",
+    "country": "cloudflare",
+    "proxy_url": "socks5://127.0.0.1:8111",
+    "proxy_host": "127.0.0.1",
+    "proxy_port": "8111",
+    "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+        log "✅ Port 7890 config recreated"
+    fi
     
     # Test ProtonVPN auth availability
     if get_protonvpn_auth >/dev/null 2>&1; then
@@ -223,16 +242,53 @@ start_gost() {
                     continue
                 fi
                 
-                # Khởi động gost với socks5 proxy
-                # Thêm các options để cải thiện stability:
-                # -L: listener (socks5 server)
-                # -F: forwarder (upstream proxy)
-                # -D: debug mode để xem log chi tiết hơn khi có lỗi kết nối
-                # Gost tự động retry và reconnect khi connection drop
-                nohup $GOST_BIN -D -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
-                local pid=$!
-                echo $pid > "$pid_file"
-                log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
+                # Tối ưu đặc biệt cho port 7890 (Cloudflare WARP)
+                if [ "$port" = "7890" ]; then
+                    # Port 7890 cần timeout dài hơn và keepalive để giảm timeout errors
+                    # Options:
+                    # - ttl=60s: timeout 60 giây cho connection
+                    # - so_keepalive=true: enable TCP keepalive để duy trì connection
+                    local optimized_proxy_url="$proxy_url"
+                    # Thêm keepalive và timeout vào proxy URL nếu chưa có
+                    if [[ "$proxy_url" == *"socks5://"* ]] && [[ "$proxy_url" != *"?"* ]]; then
+                        optimized_proxy_url="${proxy_url}?so_keepalive=true&ttl=60s"
+                    fi
+                    # Listener với timeout và keepalive để giảm timeout errors
+                    nohup $GOST_BIN -D -L "socks5://:$port?ttl=60s&so_keepalive=true" -F "$optimized_proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                    local pid=$!
+                    echo $pid > "$pid_file"
+                    log "✅ Gost on port $port started with optimized settings (PID: $pid, proxy: $optimized_proxy_url)"
+                else
+                    # Khởi động gost với socks5 proxy (các port khác)
+                    # Tối ưu đặc biệt cho ProtonVPN với các options:
+                    # -D: debug mode để xem log chi tiết hơn khi có lỗi kết nối
+                    # -L: listener với timeout và keepalive để tăng độ ổn định
+                    #   - ttl=30s: timeout 30 giây cho connection (cân bằng giữa stability và performance)
+                    #   - so_keepalive=true: enable TCP keepalive để duy trì connection
+                    #   - so_keepalive_time=30s: keepalive interval 30 giây
+                    #   - so_keepalive_intvl=10s: keepalive probe interval 10 giây
+                    #   - so_keepalive_probes=3: số lần probe trước khi đóng connection
+                    # -F: forwarder với timeout tối ưu cho ProtonVPN HTTPS proxy
+                    # Gost tự động retry và reconnect khi connection drop
+                    
+                    # Tối ưu đặc biệt cho ProtonVPN
+                    if [ "$provider" = "protonvpn" ]; then
+                        # Listener với timeout và keepalive tối ưu cho ProtonVPN
+                        local listener_opts="socks5://:$port?ttl=30s&so_keepalive=true&so_keepalive_time=30s&so_keepalive_intvl=10s&so_keepalive_probes=3"
+                        # Forwarder với timeout phù hợp cho HTTPS proxy
+                        local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true"
+                        nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                        local pid=$!
+                        echo $pid > "$pid_file"
+                        log "✅ Gost on port $port started with ProtonVPN optimizations (PID: $pid, proxy: $proxy_url)"
+                    else
+                        # Default settings cho các provider khác
+                        nohup $GOST_BIN -D -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                        local pid=$!
+                        echo $pid > "$pid_file"
+                        log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
+                    fi
+                fi
             fi
         fi
     done
@@ -353,16 +409,53 @@ restart_gost_port() {
             return 0
         fi
         
-        # Khởi động gost với socks5 proxy
-        # Thêm các options để cải thiện stability:
-        # -L: listener (socks5 server)
-        # -F: forwarder (upstream proxy)
-        # -D: debug mode để xem log chi tiết hơn khi có lỗi kết nối
-        # Gost tự động retry và reconnect khi connection drop
-        nohup $GOST_BIN -D -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
-        local pid=$!
-        echo $pid > "$pid_file"
-        log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
+        # Tối ưu đặc biệt cho port 7890 (Cloudflare WARP)
+        if [ "$port" = "7890" ]; then
+            # Port 7890 cần timeout dài hơn và keepalive để giảm timeout errors
+            # Options:
+            # - ttl=60s: timeout 60 giây cho connection
+            # - so_keepalive=true: enable TCP keepalive để duy trì connection
+            local optimized_proxy_url="$proxy_url"
+            # Thêm keepalive và timeout vào proxy URL nếu chưa có
+            if [[ "$proxy_url" == *"socks5://"* ]] && [[ "$proxy_url" != *"?"* ]]; then
+                optimized_proxy_url="${proxy_url}?so_keepalive=true&ttl=60s"
+            fi
+            # Listener với timeout và keepalive để giảm timeout errors
+            nohup $GOST_BIN -D -L "socks5://:$port?ttl=60s&so_keepalive=true" -F "$optimized_proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+            local pid=$!
+            echo $pid > "$pid_file"
+            log "✅ Gost on port $port started with optimized settings (PID: $pid, proxy: $optimized_proxy_url)"
+        else
+            # Khởi động gost với socks5 proxy (các port khác)
+            # Tối ưu đặc biệt cho ProtonVPN với các options:
+            # -D: debug mode để xem log chi tiết hơn khi có lỗi kết nối
+            # -L: listener với timeout và keepalive để tăng độ ổn định
+            #   - ttl=30s: timeout 30 giây cho connection (cân bằng giữa stability và performance)
+            #   - so_keepalive=true: enable TCP keepalive để duy trì connection
+            #   - so_keepalive_time=30s: keepalive interval 30 giây
+            #   - so_keepalive_intvl=10s: keepalive probe interval 10 giây
+            #   - so_keepalive_probes=3: số lần probe trước khi đóng connection
+            # -F: forwarder với timeout tối ưu cho ProtonVPN HTTPS proxy
+            # Gost tự động retry và reconnect khi connection drop
+            
+            # Tối ưu đặc biệt cho ProtonVPN
+            if [ "$provider" = "protonvpn" ]; then
+                # Listener với timeout và keepalive tối ưu cho ProtonVPN
+                local listener_opts="socks5://:$port?ttl=30s&so_keepalive=true&so_keepalive_time=30s&so_keepalive_intvl=10s&so_keepalive_probes=3"
+                # Forwarder với timeout phù hợp cho HTTPS proxy
+                local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true"
+                nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                local pid=$!
+                echo $pid > "$pid_file"
+                log "✅ Gost on port $port started with ProtonVPN optimizations (PID: $pid, proxy: $proxy_url)"
+            else
+                # Default settings cho các provider khác
+                nohup $GOST_BIN -D -L socks5://:$port -F "$proxy_url" > "$LOG_DIR/gost_${port}.log" 2>&1 &
+                local pid=$!
+                echo $pid > "$pid_file"
+                log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
+            fi
+        fi
     fi
 }
 

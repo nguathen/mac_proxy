@@ -24,7 +24,7 @@ test_cases = [
         }
     },
     {
-        "name": "Case 2: Port in use with different server - create new HAProxy",
+        "name": "Case 2: Port in use with different server - create new Gost",
         "data": {
             "proxy_check": "socks5://server:7891:us-ca112.nordvpn.com:89",
             "data": {
@@ -37,7 +37,7 @@ test_cases = [
         }
     },
     {
-        "name": "Case 3: HAProxy exists but different server - reconfigure",
+        "name": "Case 3: Gost exists but different server - reconfigure",
         "data": {
             "proxy_check": "socks5://server:7891:de507.nordvpn.com:89",
             "data": {
@@ -49,7 +49,7 @@ test_cases = [
         }
     },
     {
-        "name": "Case 4: HAProxy doesn't exist - create new",
+        "name": "Case 4: Gost doesn't exist - create new",
         "data": {
             "proxy_check": "socks5://server:7893:uk-fr18.nordvpn.com:89",
             "data": {
@@ -73,7 +73,7 @@ test_cases = [
         }
     },
     {
-        "name": "Case 6: Reuse available HAProxy (not in profiles list)",
+        "name": "Case 6: Reuse available Gost (not in profiles list)",
         "data": {
             "proxy_check": "socks5://server:7891:fr921.nordvpn.com:89",
             "data": {

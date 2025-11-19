@@ -162,6 +162,17 @@ def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, 
     def api_gost_delete(port):
         """Xóa gost port"""
         try:
+            # Bảo vệ tuyệt đối: không bao giờ cho phép xóa port 7890 (WARP service)
+            try:
+                port_int = int(port)
+                if port_int == 7890:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Port {port} is protected and cannot be deleted (WARP service)'
+                    }), 403
+            except (ValueError, TypeError):
+                pass
+            
             # Validate port
             if not is_valid_gost_port(port):
                 return jsonify({
@@ -183,8 +194,25 @@ def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, 
                 except (OSError, ValueError):
                     pass
             
-            # Remove config file
+            # Remove config file (double check: không bao giờ xóa port 7890)
+            try:
+                port_int = int(port)
+                if port_int == 7890:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Port {port} is protected and cannot be deleted (WARP service)'
+                    }), 403
+            except (ValueError, TypeError):
+                pass
+                
             config_file = os.path.join(BASE_DIR, 'config', f'gost_{port}.config')
+            # Triple check: không bao giờ xóa file của port 7890
+            if 'gost_7890.config' in config_file:
+                return jsonify({
+                    'success': False,
+                    'error': f'Port 7890 config file is protected and cannot be deleted'
+                }), 403
+                
             if os.path.exists(config_file):
                 try:
                     os.remove(config_file)
@@ -212,12 +240,17 @@ def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, 
 
     @app.route('/api/gost/reset-configs', methods=['POST'])
     def api_reset_gost_configs():
-        """Reset tất cả gost configs về mặc định"""
+        """Reset tất cả gost configs về mặc định (except port 7890)"""
         try:
+            protected_port = 7890  # Port 7890 được bảo vệ
+            
             # Get all available gost ports
             available_ports = get_available_gost_ports()
             
-            for port in available_ports:
+            # Loại bỏ port 7890 khỏi danh sách ports cần reset
+            ports_to_reset = [port for port in available_ports if port != protected_port]
+            
+            for port in ports_to_reset:
                 # Stop gost service
                 pid_file = os.path.join(LOG_DIR, f'gost_{port}.pid')
                 if os.path.exists(pid_file):
@@ -240,9 +273,13 @@ def register_gost_routes(app, BASE_DIR, LOG_DIR, run_command, save_gost_config, 
                     except Exception:
                         pass
             
+            message = 'All gost configs reset successfully'
+            if protected_port in available_ports:
+                message += f' (Port {protected_port} was protected and not reset)'
+            
             return jsonify({
                 'success': True,
-                'message': 'All gost configs reset successfully'
+                'message': message
             })
             
         except Exception as e:

@@ -22,58 +22,119 @@ def _apply_server_with_fallback(gost_port, apply_data, vpn_provider):
     3. Try alternative provider với specific data
     4. Try alternative provider với random server
     """
+    errors = []
+    
+    # Validate port
+    try:
+        port_num = int(gost_port)
+        if port_num < 7891 or port_num > 7999:
+            error_msg = f"Invalid port {port_num}. Port must be between 7891-7999"
+            logging.error(f"[APPLY_FALLBACK] {error_msg}")
+            return None, error_msg
+    except (ValueError, TypeError) as e:
+        error_msg = f"Invalid port format: {gost_port} ({str(e)})"
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+        return None, error_msg
+    
     # Primary provider
     if vpn_provider == 'nordvpn':
-        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{gost_port}'
+        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{port_num}'
     else:
-        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{gost_port}'
+        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{port_num}'
     
     # Try primary provider với specific data
-    apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-    if apply_response.status_code == 200:
-        return apply_response, vpn_provider
+    try:
+        logging.info(f"[APPLY_FALLBACK] Trying {vpn_provider} with specific data: {apply_data}")
+        apply_response = requests.post(apply_url, json=apply_data, timeout=15)
+        if apply_response.status_code == 200:
+            logging.info(f"[APPLY_FALLBACK] ✅ {vpn_provider} succeeded with specific data")
+            return apply_response, vpn_provider
+        else:
+            error_msg = f"{vpn_provider} returned {apply_response.status_code}"
+            try:
+                error_body = apply_response.json()
+                error_msg += f": {error_body.get('error', 'Unknown error')}"
+            except:
+                error_msg += f": {apply_response.text[:200]}"
+            errors.append(error_msg)
+            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"{vpn_provider} request failed: {str(e)}"
+        errors.append(error_msg)
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
     
     # Try primary provider với random server
-    print(f"Server not found, trying random server fallback...")
-    fallback_data = {}  # Empty data for random server
-    fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
-    if fallback_response.status_code == 200:
-        return fallback_response, vpn_provider
+    try:
+        logging.info(f"[APPLY_FALLBACK] Trying {vpn_provider} with random server...")
+        fallback_data = {}  # Empty data for random server
+        fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
+        if fallback_response.status_code == 200:
+            logging.info(f"[APPLY_FALLBACK] ✅ {vpn_provider} succeeded with random server")
+            return fallback_response, vpn_provider
+        else:
+            error_msg = f"{vpn_provider} random returned {fallback_response.status_code}"
+            try:
+                error_body = fallback_response.json()
+                error_msg += f": {error_body.get('error', 'Unknown error')}"
+            except:
+                error_msg += f": {fallback_response.text[:200]}"
+            errors.append(error_msg)
+            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"{vpn_provider} random request failed: {str(e)}"
+        errors.append(error_msg)
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
     
     # Try alternative provider
-    print(f"Primary provider failed, trying alternative provider...")
     alternative_provider = 'protonvpn' if vpn_provider == 'nordvpn' else 'nordvpn'
-    alternative_url = f'http://127.0.0.1:5000/api/{alternative_provider}/apply/{gost_port}'
+    alternative_url = f'http://127.0.0.1:5000/api/{alternative_provider}/apply/{port_num}'
     
     # Try alternative provider với specific data
-    alt_response = requests.post(alternative_url, json=apply_data, timeout=15)
-    if alt_response.status_code == 200:
-        print(f"✅ Alternative provider {alternative_provider} succeeded")
-        return alt_response, alternative_provider
+    try:
+        logging.info(f"[APPLY_FALLBACK] Trying alternative {alternative_provider} with specific data: {apply_data}")
+        alt_response = requests.post(alternative_url, json=apply_data, timeout=15)
+        if alt_response.status_code == 200:
+            logging.info(f"[APPLY_FALLBACK] ✅ Alternative provider {alternative_provider} succeeded")
+            return alt_response, alternative_provider
+        else:
+            error_msg = f"{alternative_provider} returned {alt_response.status_code}"
+            try:
+                error_body = alt_response.json()
+                error_msg += f": {error_body.get('error', 'Unknown error')}"
+            except:
+                error_msg += f": {alt_response.text[:200]}"
+            errors.append(error_msg)
+            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"{alternative_provider} request failed: {str(e)}"
+        errors.append(error_msg)
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
     
     # Try alternative provider với random server
-    alt_random_response = requests.post(alternative_url, json={}, timeout=15)
-    if alt_random_response.status_code == 200:
-        print(f"✅ Alternative provider {alternative_provider} random server succeeded")
-        return alt_random_response, alternative_provider
+    try:
+        logging.info(f"[APPLY_FALLBACK] Trying alternative {alternative_provider} with random server...")
+        alt_random_response = requests.post(alternative_url, json={}, timeout=15)
+        if alt_random_response.status_code == 200:
+            logging.info(f"[APPLY_FALLBACK] ✅ Alternative provider {alternative_provider} random server succeeded")
+            return alt_random_response, alternative_provider
+        else:
+            error_msg = f"{alternative_provider} random returned {alt_random_response.status_code}"
+            try:
+                error_body = alt_random_response.json()
+                error_msg += f": {error_body.get('error', 'Unknown error')}"
+            except:
+                error_msg += f": {alt_random_response.text[:200]}"
+            errors.append(error_msg)
+            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
+    except requests.exceptions.RequestException as e:
+        error_msg = f"{alternative_provider} random request failed: {str(e)}"
+        errors.append(error_msg)
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
     
-    # Final fallback: Try both providers with random server from any country
-    print(f"All specific attempts failed, trying random server from any country...")
-    
-    # Try primary provider with random server from any country
-    primary_random_response = requests.post(apply_url, json={}, timeout=15)
-    if primary_random_response.status_code == 200:
-        print(f"✅ Primary provider {vpn_provider} random server from any country succeeded")
-        return primary_random_response, vpn_provider
-    
-    # Try alternative provider with random server from any country
-    alt_any_random_response = requests.post(alternative_url, json={}, timeout=15)
-    if alt_any_random_response.status_code == 200:
-        print(f"✅ Alternative provider {alternative_provider} random server from any country succeeded")
-        return alt_any_random_response, alternative_provider
-    
-    # All failed
-    return None, None
+    # All failed - log all errors
+    error_summary = "; ".join(errors)
+    logging.error(f"[APPLY_FALLBACK] All attempts failed. Errors: {error_summary}")
+    return None, error_summary
 
 def _determine_smart_vpn_provider(check_server, profiles):
     """
@@ -184,6 +245,10 @@ def _find_orphaned_gost_for_port(requested_port):
         gost_services = status_data.get('gost', [])
         
         # Tìm Gost đang chạy với port yêu cầu (Gost giờ chạy trực tiếp trên 789x)
+        # Chỉ tìm port hợp lệ (7891-7999)
+        if requested_port < 7891 or requested_port > 7999:
+            return None
+            
         for gost in gost_services:
             if gost.get('running') and int(gost['port']) == requested_port:
                 return {
@@ -228,6 +293,10 @@ def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
             if gost.get('running'):
                 gost_port = int(gost['port'])
                 
+                # Skip port không hợp lệ (phải trong khoảng 7891-7999)
+                if gost_port < 7891 or gost_port > 7999:
+                    continue
+                
                 # Kiểm tra server info từ gost
                 server_info = gost.get('server_info', '')
                 if server_info and ':' in server_info:
@@ -249,6 +318,10 @@ def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
             if gost.get('running'):
                 gost_port = int(gost['port'])
                 
+                # Skip port không hợp lệ (phải trong khoảng 7891-7999)
+                if gost_port < 7891 or gost_port > 7999:
+                    continue
+                
                 # Kiểm tra xem Gost port này có đang được sử dụng bởi profiles không
                 if gost_port not in used_ports:
                     return {
@@ -263,7 +336,7 @@ def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
         print(f"Error finding available Gost: {e}")
         return None
 
-def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_proxy_port):
+def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_port):
     """Đăng ký các routes Chrome với Flask app"""
     
     @app.route('/api/chrome/proxy-check', methods=['POST'])
@@ -317,6 +390,12 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     'success': False,
                     'error': f'Invalid port in proxy_check: {check_port}'
                 }), 400
+            
+            # Validate check_port is in valid range (7891-7999)
+            check_port_num = int(check_port)
+            if check_port_num < 7891 or check_port_num > 7999:
+                logging.warning(f"[CHROME_PROXY_CHECK] check_port {check_port_num} is out of valid range (7891-7999), will find new port")
+                # Không return error, chỉ log warning và sẽ tìm port mới sau
             
             # Parse proxy_check để map với 3 trường hợp apply
             apply_data = {}
@@ -416,14 +495,17 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 if available_gost:
                     # Sử dụng lại Gost đang rảnh
                     gost_port = available_gost['port']
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using available Gost port: {gost_port} (type: {type(gost_port).__name__})")
                     
                     # Apply Gost với dữ liệu đã phân tích
-                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
                     if apply_response is None:
+                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
                         return jsonify({
                             'success': False,
-                            'error': 'Failed to apply server to both providers'
+                            'error': f'Failed to apply server: {error_msg}'
                         }), 500
+                    vpn_provider = result
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
@@ -480,6 +562,8 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
                 
+                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using new Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                
                 # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10
                 retry_count = 0
@@ -487,12 +571,15 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 
                 while retry_count < max_retries:
                     # Apply Gost với port mới
-                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Attempt {retry_count + 1}/{max_retries} - Applying to port {gost_port}")
+                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
                     if apply_response is None:
+                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
                         return jsonify({
                             'success': False,
-                            'error': 'Failed to apply server to both providers'
+                            'error': f'Failed to apply server: {error_msg}'
                         }), 500
+                    vpn_provider = result
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
@@ -563,6 +650,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 if available_gost:
                     # Sử dụng lại Gost đang rảnh
                     gost_port = available_gost['port']
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using available Gost port: {gost_port} (type: {type(gost_port).__name__})")
                     
                     # Kiểm tra xem có phải cùng server không
                     if available_gost.get('same_server'):
@@ -571,12 +659,14 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                         return f'socks5://{client_host}:{gost_port}:{check_server}:{check_proxy_port}'
                     
                     # Khác server, apply Gost với dữ liệu đã phân tích
-                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
                     if apply_response is None:
+                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
                         return jsonify({
                             'success': False,
-                            'error': 'Failed to apply server to both providers'
+                            'error': f'Failed to apply server: {error_msg}'
                         }), 500
+                    vpn_provider = result
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
@@ -633,6 +723,8 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
                 
+                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using new Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                
                 # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10
                 retry_count = 0
@@ -640,12 +732,15 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                 
                 while retry_count < max_retries:
                     # Apply Gost với port mới
-                    apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Attempt {retry_count + 1}/{max_retries} - Applying to port {gost_port}")
+                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
                     if apply_response is None:
+                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
                         return jsonify({
                             'success': False,
-                            'error': 'Failed to apply server to both providers'
+                            'error': f'Failed to apply server: {error_msg}'
                         }), 500
+                    vpn_provider = result
                     
                     # Parse response để lấy thông tin server thực tế
                     apply_result = apply_response.json()
