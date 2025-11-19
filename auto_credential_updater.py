@@ -119,18 +119,36 @@ class AutoCredentialUpdater:
         if not os.path.exists(log_file):
             return False
             
-        # Đọc 50 dòng cuối của log file
+        # Đọc 100 dòng cuối của log file để phát hiện lỗi tốt hơn
         try:
             with open(log_file, 'r') as f:
                 lines = f.readlines()
-                recent_lines = lines[-50:] if len(lines) > 50 else lines
+                recent_lines = lines[-100:] if len(lines) > 100 else lines
                 
-                # Kiểm tra lỗi 407 hoặc i/o timeout trong 5 phút gần nhất
+                # Đếm số lỗi 407 và i/o timeout gần đây
+                auth_error_count = 0
+                timeout_error_count = 0
+                
                 for line in recent_lines:
-                    if '407 Proxy Authentication Required' in line or 'i/o timeout' in line:
+                    if '407 Proxy Authentication Required' in line:
                         # Kiểm tra timestamp (trong 5 phút gần nhất)
                         if self._is_recent_error_simple(line):
-                            return True
+                            auth_error_count += 1
+                    elif 'i/o timeout' in line:
+                        # Kiểm tra timestamp (trong 5 phút gần nhất)
+                        if self._is_recent_error_simple(line):
+                            timeout_error_count += 1
+                
+                # Nếu có lỗi 407 (authentication), cần cập nhật credentials
+                if auth_error_count > 0:
+                    print(f"🔍 Found {auth_error_count} authentication errors (407) for port {port}")
+                    return True
+                
+                # Nếu có quá nhiều timeout (>= 5), có thể là server không hoạt động
+                # Nhưng không phải là lỗi authentication, nên không cập nhật credentials
+                if timeout_error_count >= 5:
+                    print(f"⚠️  Found {timeout_error_count} timeout errors for port {port} (server may be down)")
+                    
         except Exception as e:
             print(f"❌ Error reading log file {log_file}: {e}")
             
@@ -195,7 +213,7 @@ class AutoCredentialUpdater:
             # Trích xuất host và port từ proxy_url hiện tại
             current_proxy_url = config.get('proxy_url', '')
             if current_proxy_url:
-                # Parse URL: https://token@host:port
+                # Parse URL: https://username:password@host:port hoặc https://token@host:port
                 if '@' in current_proxy_url:
                     parts = current_proxy_url.split('@', 1)
                     if len(parts) == 2:
@@ -203,7 +221,7 @@ class AutoCredentialUpdater:
                         if ':' in host_port:
                             proxy_host, proxy_port = host_port.split(':', 1)
                             
-                            # Tạo proxy_url mới với auth token mới
+                            # Tạo proxy_url mới với auth token mới (username:password format)
                             new_proxy_url = f"https://{auth_token}@{proxy_host}:{proxy_port}"
                             config['proxy_url'] = new_proxy_url
                             config['updated_at'] = datetime.now().isoformat()
@@ -229,11 +247,11 @@ class AutoCredentialUpdater:
     def _get_fresh_auth_token(self) -> Optional[str]:
         """Lấy auth token mới từ protonvpn_service (config_token.txt)"""
         try:
-            # Sử dụng protonvpn_service để lấy password
-            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.password:
-                return ProtonVpnServiceInstance.password
+            # Sử dụng protonvpn_service để lấy username:password
+            if ProtonVpnServiceInstance and ProtonVpnServiceInstance.user_name and ProtonVpnServiceInstance.password:
+                return f"{ProtonVpnServiceInstance.user_name}:{ProtonVpnServiceInstance.password}"
             else:
-                print("❌ Failed to get ProtonVPN password from protonvpn_service")
+                print("❌ Failed to get ProtonVPN credentials from protonvpn_service")
                 return None
         except Exception as e:
             print(f"❌ Error getting fresh auth token: {e}")

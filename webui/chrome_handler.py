@@ -480,36 +480,6 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
                 
-                # Apply Gost với dữ liệu đã phân tích trước
-                apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                if apply_response is None:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Failed to apply server to both providers'
-                    }), 500
-                
-                # Parse response để lấy thông tin server thực tế
-                apply_result = apply_response.json()
-                if apply_result.get('success'):
-                    actual_server = apply_result.get('server', {})
-                    # Sử dụng hostname hoặc domain tùy theo VPN provider
-                    actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                    # Parse port từ proxy_url hoặc sử dụng default
-                    proxy_url = apply_result.get('proxy_url', '')
-                    if proxy_url and ':' in proxy_url:
-                        try:
-                            # Parse port từ proxy_url (format: https://user:pass@host:port)
-                            port_part = proxy_url.split('@')[-1].split(':')[-1]
-                            actual_proxy_port = port_part
-                        except:
-                            actual_proxy_port = '89'
-                    else:
-                        actual_proxy_port = '89'
-                else:
-                    # Fallback nếu không parse được
-                    actual_proxy_host = check_server if check_server else 'random-server'
-                    actual_proxy_port = '89'
-                
                 # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10
                 retry_count = 0
@@ -662,36 +632,6 @@ def register_chrome_routes(app, BASE_DIR, get_available_haproxy_ports, _get_prox
                     
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
-                
-                # Apply Gost với dữ liệu đã phân tích trước
-                apply_response, vpn_provider = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                if apply_response is None:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Failed to apply server to both providers'
-                    }), 500
-                
-                # Parse response để lấy thông tin server thực tế
-                apply_result = apply_response.json()
-                if apply_result.get('success'):
-                    actual_server = apply_result.get('server', {})
-                    # Sử dụng hostname hoặc domain tùy theo VPN provider
-                    actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                    # Parse port từ proxy_url hoặc sử dụng default
-                    proxy_url = apply_result.get('proxy_url', '')
-                    if proxy_url and ':' in proxy_url:
-                        try:
-                            # Parse port từ proxy_url (format: https://user:pass@host:port)
-                            port_part = proxy_url.split('@')[-1].split(':')[-1]
-                            actual_proxy_port = port_part
-                        except:
-                            actual_proxy_port = '89'
-                    else:
-                        actual_proxy_port = '89'
-                else:
-                    # Fallback nếu không parse được
-                    actual_proxy_host = check_server if check_server else 'random-server'
-                    actual_proxy_port = '89'
                 
                 # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
                 max_retries = 10

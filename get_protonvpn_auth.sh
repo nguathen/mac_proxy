@@ -24,8 +24,12 @@ if script_dir not in sys.path:
 
 try:
     from protonvpn_service import Instance
-    if Instance and hasattr(Instance, 'password') and Instance.password:
-        print(Instance.password)
+    Instance.load()
+    if Instance and hasattr(Instance, 'user_name') and hasattr(Instance, 'password'):
+        if Instance.user_name and Instance.password:
+            print(f'{Instance.user_name}:{Instance.password}')
+        else:
+            print('', end='')
     else:
         print('', end='')
 except Exception as e:
