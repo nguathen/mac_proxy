@@ -40,6 +40,34 @@ fi
 log "⏳ Đợi thêm 10 giây để các service khác sẵn sàng..."
 sleep 10
 
+# Cấu hình WARP nếu đã cài đặt
+if command -v warp-cli &> /dev/null; then
+    log "🔐 Cấu hình Cloudflare WARP..."
+    
+    # Đợi WARP daemon sẵn sàng
+    WAIT_COUNT=0
+    MAX_WAIT=30
+    while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+        if warp-cli --accept-tos status &>/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+        WAIT_COUNT=$((WAIT_COUNT + 1))
+    done
+    
+    if [ $WAIT_COUNT -lt $MAX_WAIT ]; then
+        # Cấu hình WARP
+        warp-cli --accept-tos mode proxy >/dev/null 2>&1 || true
+        sleep 1
+        warp-cli --accept-tos proxy port 8111 >/dev/null 2>&1 || true
+        sleep 1
+        warp-cli --accept-tos connect >/dev/null 2>&1 || true
+        log "✅ WARP đã được cấu hình"
+    else
+        log "⚠️  WARP daemon chưa sẵn sàng, bỏ qua cấu hình WARP"
+    fi
+fi
+
 # Kiểm tra xem hệ thống đã chạy chưa (tránh chạy trùng)
 if pgrep -f "start_all.sh" | grep -v "$$" >/dev/null; then
     log "⚠️  start_all.sh đã đang chạy, bỏ qua..."
