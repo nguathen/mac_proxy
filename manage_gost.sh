@@ -352,17 +352,17 @@ EOF
                         # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
                         # - Tối ưu keepalive settings để duy trì connection tốt
                         # Options:
-                        # - Listener ttl=10s: timeout 10 giây cho client connections (tối ưu cho latency)
-                        # - Forwarder ttl=30s: timeout 30 giây cho upstream proxy (đảm bảo đủ thời gian cho TLS handshake và authentication)
+                        # - Listener ttl=60s: timeout 60 giây cho client connections (tăng từ 10s để tránh timeout khi upstream chậm)
+                        # - Forwarder ttl=90s: timeout 90 giây cho upstream proxy (tăng từ 30s để đảm bảo đủ thời gian cho TLS handshake và authentication với server xa)
                         # - so_keepalive=true: enable TCP keepalive
                         # - so_keepalive_time=10s: keepalive interval 10 giây
                         # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
                         # - so_keepalive_probes=3: số lần probe trước khi đóng connection
                         # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
                         # - so_sndbuf=65536: tăng send buffer size để tăng throughput
-                        local listener_opts="socks5://:$port?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                        local listener_opts="socks5://:$port?ttl=60s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                         # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
-                        local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                        local forwarder_opts="$proxy_url?ttl=90s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -557,17 +557,17 @@ restart_gost_port() {
                 # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
                 # - Tối ưu keepalive settings để duy trì connection tốt
                 # Options:
-                # - Listener ttl=10s: timeout 10 giây cho client connections (tối ưu cho latency)
-                # - Forwarder ttl=30s: timeout 30 giây cho upstream proxy (đảm bảo đủ thời gian cho TLS handshake và authentication)
+                # - Listener ttl=60s: timeout 60 giây cho client connections (tăng từ 10s để tránh timeout khi upstream chậm)
+                # - Forwarder ttl=90s: timeout 90 giây cho upstream proxy (tăng từ 30s để đảm bảo đủ thời gian cho TLS handshake và authentication với server xa)
                 # - so_keepalive=true: enable TCP keepalive
                 # - so_keepalive_time=10s: keepalive interval 10 giây
                 # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
                 # - so_keepalive_probes=3: số lần probe trước khi đóng connection
                 # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
                 # - so_sndbuf=65536: tăng send buffer size để tăng throughput
-                local listener_opts="socks5://:$port?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                local listener_opts="socks5://:$port?ttl=60s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                 # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
-                local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                local forwarder_opts="$proxy_url?ttl=90s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"

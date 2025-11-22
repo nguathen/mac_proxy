@@ -8,6 +8,7 @@ config/
 
 # Logs
 logs/
+*.pyc
 *.log
 
 # PID files

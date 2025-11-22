@@ -344,17 +344,26 @@ class AutoCredentialUpdater:
         for profile in profiles:
             proxy = profile.get('proxy', '')
             if proxy and ':' in proxy:
-                # Parse proxy format: "socks5://host:PORT:server" hoặc "127.0.0.1:PORT:server"
-                parts = proxy.split(':')
+                # Parse proxy format: "socks5://host:PORT:server:proxy_port" hoặc "127.0.0.1:PORT:server:proxy_port"
+                # Format: socks5://proxyy.zapto.org:7891:lk-01.protonvpn.net:4465
+                # Port gost là port thứ 2 (sau host)
+                
+                # Remove socks5:// prefix nếu có
+                proxy_str = proxy
+                if proxy_str.startswith('socks5://'):
+                    proxy_str = proxy_str[9:]  # Remove "socks5://"
+                
+                parts = proxy_str.split(':')
                 if len(parts) >= 2:
                     try:
-                        # Tìm port trong các phần của proxy string
-                        for part in parts:
-                            if part.isdigit() and 1000 <= int(part) <= 65535:
-                                port = int(part)
+                        # Port gost là phần thứ 2 (index 1) sau host
+                        port_str = parts[1].strip()
+                        if port_str.isdigit():
+                            port = int(port_str)
+                            # Chỉ lấy port trong khoảng hợp lệ cho gost (7891-7999)
+                            if 7891 <= port <= 7999:
                                 ports.add(port)
-                                break
-                    except ValueError:
+                    except (ValueError, IndexError):
                         pass
         return ports
             
@@ -487,15 +496,25 @@ class AutoCredentialUpdater:
                         config = json.load(f)
                         created_at = config.get('created_at', '')
                         if created_at:
-                            # Parse ISO format: 2025-10-23T15:00:00Z
+                            # Parse ISO format: 2025-10-23T15:00:00Z hoặc 2025-10-23T15:00:00+07:00
                             from datetime import datetime
                             try:
-                                config_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                                age_seconds = current_time - config_time.timestamp()
+                                # Xử lý timezone: thay Z bằng +00:00, giữ nguyên timezone khác
+                                created_at_str = created_at.replace('Z', '+00:00')
+                                config_time = datetime.fromisoformat(created_at_str)
+                                config_age_seconds = current_time - config_time.timestamp()
+                                # Chỉ sử dụng config time nếu hợp lệ (không âm và không quá lớn)
+                                if config_age_seconds >= 0 and config_age_seconds < 86400 * 365:  # Không quá 1 năm
+                                    age_seconds = config_age_seconds
                             except:
                                 pass
             except:
                 pass
+            
+            # Nếu age_seconds âm (lỗi timezone hoặc thời gian trong tương lai), cho phép cleanup
+            if age_seconds < 0:
+                print(f"⚠️  {service_type} {port} has invalid timestamp (negative age), allowing cleanup")
+                return True
             
             # Nếu service được tạo gần đây (dưới 5 phút), không cleanup
             if age_seconds < min_age_seconds:
