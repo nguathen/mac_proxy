@@ -4,7 +4,15 @@
 
 set -euo pipefail
 
-GOST_BIN="gost"
+# Gost binary path - try bin/gost first, then system gost
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/bin/gost" ]; then
+    GOST_BIN="$SCRIPT_DIR/bin/gost"
+elif command -v gost &> /dev/null; then
+    GOST_BIN="gost"
+else
+    GOST_BIN="gost"  # Will fail with clear error if not found
+fi
 LOG_DIR="./logs"
 PID_DIR="./logs"
 CONFIG_DIR="./config"
@@ -274,11 +282,19 @@ EOF
                 local provider=""
                 local country=""
                 
-                # Parse JSON config using jq
+                # Parse JSON config using Python (fallback if jq not available)
                 if [ "$config_json" != "{}" ]; then
-                    proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
-                    provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
-                    country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+                    # Try jq first, fallback to Python
+                    if command -v jq &> /dev/null; then
+                        proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+                        provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
+                        country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+                    else
+                        # Use Python to parse JSON
+                        proxy_url=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('proxy_url', '') or '')" 2>/dev/null || echo "")
+                        provider=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('provider', '') or '')" 2>/dev/null || echo "")
+                        country=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('country', '') or '')" 2>/dev/null || echo "")
+                    fi
                 fi
                 
                 # Nếu không có config hoặc config rỗng, skip port này
@@ -334,10 +350,10 @@ EOF
                         # - Latency: Gost tốt hơn ProtonVPN trực tiếp (nhanh hơn 36-42%)
                         # - Connection latency: Gost nhanh hơn 332-1615ms
                         # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
-                        # - Ttl=10s: Tối ưu nhất cho cả latency và throughput (test cho thấy 20s làm giảm throughput)
                         # - Tối ưu keepalive settings để duy trì connection tốt
                         # Options:
-                        # - ttl=10s: timeout 10 giây (tối ưu cho latency và throughput)
+                        # - Listener ttl=10s: timeout 10 giây cho client connections (tối ưu cho latency)
+                        # - Forwarder ttl=30s: timeout 30 giây cho upstream proxy (đảm bảo đủ thời gian cho TLS handshake và authentication)
                         # - so_keepalive=true: enable TCP keepalive
                         # - so_keepalive_time=10s: keepalive interval 10 giây
                         # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
@@ -345,8 +361,8 @@ EOF
                         # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
                         # - so_sndbuf=65536: tăng send buffer size để tăng throughput
                         local listener_opts="socks5://:$port?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
-                        # Forwarder với timeout tối ưu để cân bằng latency và throughput
-                        local forwarder_opts="$proxy_url?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                        # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
+                        local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -471,11 +487,19 @@ restart_gost_port() {
         local provider=""
         local country=""
         
-        # Parse JSON config using jq
+        # Parse JSON config using Python (fallback if jq not available)
         if [ "$config_json" != "{}" ]; then
-            proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
-            provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
-            country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+            # Try jq first, fallback to Python
+            if command -v jq &> /dev/null; then
+                proxy_url=$(echo "$config_json" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+                provider=$(echo "$config_json" | jq -r '.provider // ""' 2>/dev/null || echo "")
+                country=$(echo "$config_json" | jq -r '.country // ""' 2>/dev/null || echo "")
+            else
+                # Use Python to parse JSON
+                proxy_url=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('proxy_url', '') or '')" 2>/dev/null || echo "")
+                provider=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('provider', '') or '')" 2>/dev/null || echo "")
+                country=$(echo "$config_json" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('country', '') or '')" 2>/dev/null || echo "")
+            fi
         fi
         
         # Nếu không có config hoặc config rỗng, skip port này
@@ -531,10 +555,10 @@ restart_gost_port() {
                 # - Latency: Gost tốt hơn ProtonVPN trực tiếp (nhanh hơn 36-42%)
                 # - Connection latency: Gost nhanh hơn 332-1615ms
                 # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
-                # - Ttl=10s: Tối ưu nhất cho cả latency và throughput (test cho thấy 20s làm giảm throughput)
                 # - Tối ưu keepalive settings để duy trì connection tốt
                 # Options:
-                # - ttl=10s: timeout 10 giây (tối ưu cho latency và throughput)
+                # - Listener ttl=10s: timeout 10 giây cho client connections (tối ưu cho latency)
+                # - Forwarder ttl=30s: timeout 30 giây cho upstream proxy (đảm bảo đủ thời gian cho TLS handshake và authentication)
                 # - so_keepalive=true: enable TCP keepalive
                 # - so_keepalive_time=10s: keepalive interval 10 giây
                 # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
@@ -542,8 +566,8 @@ restart_gost_port() {
                 # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
                 # - so_sndbuf=65536: tăng send buffer size để tăng throughput
                 local listener_opts="socks5://:$port?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
-                # Forwarder với timeout tối ưu để cân bằng latency và throughput
-                local forwarder_opts="$proxy_url?ttl=10s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
+                local forwarder_opts="$proxy_url?ttl=30s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"

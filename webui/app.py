@@ -270,9 +270,9 @@ def api_status():
                     except:
                         pass
                 
-                # Fallback: kiểm tra port có đang listen không (cho port 7890)
-                # Port 7890 chỉ được sử dụng bởi Gost
-                if port == '7890' and not running:
+                # Fallback: kiểm tra port có đang listen không (cho tất cả các port)
+                # Nếu PID file không hợp lệ hoặc process không chạy, kiểm tra port
+                if not running:
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.settimeout(1)
@@ -292,6 +292,12 @@ def api_status():
                                         if 'gost' in proc_name:
                                             running = True
                                             pid = port_pid
+                                            # Cập nhật PID file với PID thực tế
+                                            try:
+                                                with open(pid_file, 'w') as f:
+                                                    f.write(pid)
+                                            except:
+                                                pass
                             except:
                                 pass
                     except:
@@ -402,6 +408,16 @@ def api_test_proxy(port):
     try:
         import requests
         import socket
+        
+        # Import PySocks để hỗ trợ SOCKS proxy
+        try:
+            import socks
+            import requests.packages.urllib3.util.connection as urllib3_connection
+        except ImportError:
+            return jsonify({
+                'success': False,
+                'error': 'Missing dependencies for SOCKS support. Please install: python3-socks'
+            })
         
         # Test if port is listening
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

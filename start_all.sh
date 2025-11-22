@@ -16,9 +16,15 @@ mkdir -p config logs
 
 # Kiểm tra Gost
 if ! command -v gost &> /dev/null; then
-    echo "❌ Gost chưa được cài đặt"
-    echo "   Chạy: brew install gost"
-    exit 1
+    # Thử tìm trong thư mục bin local
+    if [ -f "$SCRIPT_DIR/bin/gost" ]; then
+        export PATH="$SCRIPT_DIR/bin:$PATH"
+        echo "✅ Sử dụng Gost từ thư mục bin local"
+    else
+        echo "❌ Gost chưa được cài đặt"
+        echo "   Chạy: brew install gost"
+        exit 1
+    fi
 fi
 
 # Đảm bảo config cho port 7890 tồn tại (WARP service)
@@ -48,8 +54,8 @@ chmod +x manage_gost.sh
 # Cấu hình mặc định nếu chưa có
 echo "📋 Checking gost configurations..."
 if [ ! -f "config/gost_7891.config" ]; then
-    echo "   Setting up default configuration for instance 7891..."
-    ./manage_gost.sh config 7891 protonvpn "node-uk-29.protonvpn.net" "node-uk-29.protonvpn.net" "4443"
+    echo "   ⚠️  No default configuration found for instance 7891"
+    echo "   💡 Bạn có thể cấu hình qua Web UI tại http://localhost:5000"
 fi
 
 ./manage_gost.sh start
