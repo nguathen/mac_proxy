@@ -346,23 +346,28 @@ EOF
                     
                     # Tối ưu đặc biệt cho ProtonVPN
                     if [ "$provider" = "protonvpn" ]; then
-                        # Tối ưu dựa trên kết quả test với cùng server (node-us-215b.protonvpn.net:4449):
-                        # - Latency: Gost tốt hơn ProtonVPN trực tiếp (nhanh hơn 36-42%)
-                        # - Connection latency: Gost nhanh hơn 332-1615ms
-                        # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
-                        # - Tối ưu keepalive settings để duy trì connection tốt
+                        # Tối ưu dựa trên kết quả test 52 server LK:
+                        # - SOCKS5 có ping tốt hơn HTTP ~8ms nhưng độ biến thiên cao hơn
+                        # - HTTP có tốc độ tốt hơn SOCKS5 ~1.5Mbps và ổn định hơn
+                        # - Cả hai đều có độ biến thiên cao (ping ~155-176ms, speed ~26-27Mbps)
+                        # Tối ưu mới:
+                        # - Tăng buffer size từ 64KB lên 128KB để tăng throughput (đặc biệt cho SOCKS5)
+                        # - Giảm TTL từ 60s/90s xuống 45s/75s để giảm latency overhead
+                        # - Thêm TCP_NODELAY để giảm latency cho các request nhỏ
+                        # - Tối ưu keepalive để giảm độ biến thiên (tăng interval lên 15s)
                         # Options:
-                        # - Listener ttl=60s: timeout 60 giây cho client connections (tăng từ 10s để tránh timeout khi upstream chậm)
-                        # - Forwarder ttl=90s: timeout 90 giây cho upstream proxy (tăng từ 30s để đảm bảo đủ thời gian cho TLS handshake và authentication với server xa)
+                        # - Listener ttl=45s: timeout 45 giây (giảm từ 60s để giảm latency overhead)
+                        # - Forwarder ttl=75s: timeout 75 giây (giảm từ 90s, vẫn đủ cho TLS handshake)
                         # - so_keepalive=true: enable TCP keepalive
-                        # - so_keepalive_time=10s: keepalive interval 10 giây
-                        # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
+                        # - so_keepalive_time=15s: keepalive interval 15 giây (tăng từ 10s để giảm overhead)
+                        # - so_keepalive_intvl=5s: keepalive probe interval 5 giây (tăng từ 3s)
                         # - so_keepalive_probes=3: số lần probe trước khi đóng connection
-                        # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
-                        # - so_sndbuf=65536: tăng send buffer size để tăng throughput
-                        local listener_opts="socks5://:$port?ttl=60s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
-                        # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
-                        local forwarder_opts="$proxy_url?ttl=90s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                        # - so_rcvbuf=131072: tăng receive buffer size lên 128KB (tăng từ 64KB để tăng throughput)
+                        # - so_sndbuf=131072: tăng send buffer size lên 128KB (tăng từ 64KB để tăng throughput)
+                        # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
+                        local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                        # Forwarder với timeout tối ưu và buffer lớn hơn
+                        local forwarder_opts="$proxy_url?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -551,23 +556,28 @@ restart_gost_port() {
             
             # Tối ưu đặc biệt cho ProtonVPN
             if [ "$provider" = "protonvpn" ]; then
-                # Tối ưu dựa trên kết quả test với cùng server (node-us-215b.protonvpn.net:4449):
-                # - Latency: Gost tốt hơn ProtonVPN trực tiếp (nhanh hơn 36-42%)
-                # - Connection latency: Gost nhanh hơn 332-1615ms
-                # - Ping average: Gost tốt hơn 1568-1895ms (36-41%)
-                # - Tối ưu keepalive settings để duy trì connection tốt
+                # Tối ưu dựa trên kết quả test 52 server LK:
+                # - SOCKS5 có ping tốt hơn HTTP ~8ms nhưng độ biến thiên cao hơn
+                # - HTTP có tốc độ tốt hơn SOCKS5 ~1.5Mbps và ổn định hơn
+                # - Cả hai đều có độ biến thiên cao (ping ~155-176ms, speed ~26-27Mbps)
+                # Tối ưu mới:
+                # - Tăng buffer size từ 64KB lên 128KB để tăng throughput (đặc biệt cho SOCKS5)
+                # - Giảm TTL từ 60s/90s xuống 45s/75s để giảm latency overhead
+                # - Thêm TCP_NODELAY để giảm latency cho các request nhỏ
+                # - Tối ưu keepalive để giảm độ biến thiên (tăng interval lên 15s)
                 # Options:
-                # - Listener ttl=60s: timeout 60 giây cho client connections (tăng từ 10s để tránh timeout khi upstream chậm)
-                # - Forwarder ttl=90s: timeout 90 giây cho upstream proxy (tăng từ 30s để đảm bảo đủ thời gian cho TLS handshake và authentication với server xa)
+                # - Listener ttl=45s: timeout 45 giây (giảm từ 60s để giảm latency overhead)
+                # - Forwarder ttl=75s: timeout 75 giây (giảm từ 90s, vẫn đủ cho TLS handshake)
                 # - so_keepalive=true: enable TCP keepalive
-                # - so_keepalive_time=10s: keepalive interval 10 giây
-                # - so_keepalive_intvl=3s: keepalive probe interval 3 giây
+                # - so_keepalive_time=15s: keepalive interval 15 giây (tăng từ 10s để giảm overhead)
+                # - so_keepalive_intvl=5s: keepalive probe interval 5 giây (tăng từ 3s)
                 # - so_keepalive_probes=3: số lần probe trước khi đóng connection
-                # - so_rcvbuf=65536: tăng receive buffer size để tăng throughput
-                # - so_sndbuf=65536: tăng send buffer size để tăng throughput
-                local listener_opts="socks5://:$port?ttl=60s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
-                # Forwarder với timeout dài hơn để tránh timeout khi TLS handshake chậm hoặc server xa
-                local forwarder_opts="$proxy_url?ttl=90s&so_keepalive=true&so_keepalive_time=10s&so_keepalive_intvl=3s&so_keepalive_probes=3&so_rcvbuf=65536&so_sndbuf=65536"
+                # - so_rcvbuf=131072: tăng receive buffer size lên 128KB (tăng từ 64KB để tăng throughput)
+                # - so_sndbuf=131072: tăng send buffer size lên 128KB (tăng từ 64KB để tăng throughput)
+                # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
+                local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                # Forwarder với timeout tối ưu và buffer lớn hơn
+                local forwarder_opts="$proxy_url?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"

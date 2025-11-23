@@ -20,6 +20,34 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _status_cache = {}
 _status_cache_ttl = 5
 
+def _try_apply_request(provider, port_num, apply_data, is_random=False):
+    """
+    Thử apply request với provider và data cho trước
+    Returns: (response, error_msg) - response là None nếu failed
+    """
+    apply_url = f'http://127.0.0.1:5000/api/{provider}/apply/{port_num}'
+    data_label = "random server" if is_random else "specific data"
+    
+    try:
+        logging.info(f"[APPLY_FALLBACK] Trying {provider} with {data_label}: {apply_data if not is_random else '{}'}")
+        response = requests.post(apply_url, json=apply_data, timeout=15)
+        if response.status_code == 200:
+            logging.info(f"[APPLY_FALLBACK] ✅ {provider} succeeded with {data_label}")
+            return response, None
+        else:
+            error_msg = f"{provider} {data_label} returned {response.status_code}"
+            try:
+                error_body = response.json()
+                error_msg += f": {error_body.get('error', 'Unknown error')}"
+            except:
+                error_msg += f": {response.text[:200]}"
+            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
+            return None, error_msg
+    except requests.exceptions.RequestException as e:
+        error_msg = f"{provider} {data_label} request failed: {str(e)}"
+        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+        return None, error_msg
+
 def _apply_server_with_fallback(gost_port, apply_data, vpn_provider):
     """
     Apply server với fallback logic:
@@ -42,100 +70,36 @@ def _apply_server_with_fallback(gost_port, apply_data, vpn_provider):
         logging.error(f"[APPLY_FALLBACK] {error_msg}")
         return None, error_msg
     
-    # Primary provider
-    if vpn_provider == 'nordvpn':
-        apply_url = f'http://127.0.0.1:5000/api/nordvpn/apply/{port_num}'
-    else:
-        apply_url = f'http://127.0.0.1:5000/api/protonvpn/apply/{port_num}'
-    
     # Try primary provider với specific data
-    try:
-        logging.info(f"[APPLY_FALLBACK] Trying {vpn_provider} with specific data: {apply_data}")
-        apply_response = requests.post(apply_url, json=apply_data, timeout=15)
-        if apply_response.status_code == 200:
-            logging.info(f"[APPLY_FALLBACK] ✅ {vpn_provider} succeeded with specific data")
-            return apply_response, vpn_provider
-        else:
-            error_msg = f"{vpn_provider} returned {apply_response.status_code}"
-            try:
-                error_body = apply_response.json()
-                error_msg += f": {error_body.get('error', 'Unknown error')}"
-            except:
-                error_msg += f": {apply_response.text[:200]}"
-            errors.append(error_msg)
-            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
-    except requests.exceptions.RequestException as e:
-        error_msg = f"{vpn_provider} request failed: {str(e)}"
-        errors.append(error_msg)
-        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+    response, error = _try_apply_request(vpn_provider, port_num, apply_data, is_random=False)
+    if response:
+        return response, vpn_provider
+    if error:
+        errors.append(error)
     
     # Try primary provider với random server
-    try:
-        logging.info(f"[APPLY_FALLBACK] Trying {vpn_provider} with random server...")
-        fallback_data = {}  # Empty data for random server
-        fallback_response = requests.post(apply_url, json=fallback_data, timeout=15)
-        if fallback_response.status_code == 200:
-            logging.info(f"[APPLY_FALLBACK] ✅ {vpn_provider} succeeded with random server")
-            return fallback_response, vpn_provider
-        else:
-            error_msg = f"{vpn_provider} random returned {fallback_response.status_code}"
-            try:
-                error_body = fallback_response.json()
-                error_msg += f": {error_body.get('error', 'Unknown error')}"
-            except:
-                error_msg += f": {fallback_response.text[:200]}"
-            errors.append(error_msg)
-            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
-    except requests.exceptions.RequestException as e:
-        error_msg = f"{vpn_provider} random request failed: {str(e)}"
-        errors.append(error_msg)
-        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+    response, error = _try_apply_request(vpn_provider, port_num, {}, is_random=True)
+    if response:
+        return response, vpn_provider
+    if error:
+        errors.append(error)
     
     # Try alternative provider
     alternative_provider = 'protonvpn' if vpn_provider == 'nordvpn' else 'nordvpn'
-    alternative_url = f'http://127.0.0.1:5000/api/{alternative_provider}/apply/{port_num}'
     
     # Try alternative provider với specific data
-    try:
-        logging.info(f"[APPLY_FALLBACK] Trying alternative {alternative_provider} with specific data: {apply_data}")
-        alt_response = requests.post(alternative_url, json=apply_data, timeout=15)
-        if alt_response.status_code == 200:
-            logging.info(f"[APPLY_FALLBACK] ✅ Alternative provider {alternative_provider} succeeded")
-            return alt_response, alternative_provider
-        else:
-            error_msg = f"{alternative_provider} returned {alt_response.status_code}"
-            try:
-                error_body = alt_response.json()
-                error_msg += f": {error_body.get('error', 'Unknown error')}"
-            except:
-                error_msg += f": {alt_response.text[:200]}"
-            errors.append(error_msg)
-            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
-    except requests.exceptions.RequestException as e:
-        error_msg = f"{alternative_provider} request failed: {str(e)}"
-        errors.append(error_msg)
-        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+    response, error = _try_apply_request(alternative_provider, port_num, apply_data, is_random=False)
+    if response:
+        return response, alternative_provider
+    if error:
+        errors.append(error)
     
     # Try alternative provider với random server
-    try:
-        logging.info(f"[APPLY_FALLBACK] Trying alternative {alternative_provider} with random server...")
-        alt_random_response = requests.post(alternative_url, json={}, timeout=15)
-        if alt_random_response.status_code == 200:
-            logging.info(f"[APPLY_FALLBACK] ✅ Alternative provider {alternative_provider} random server succeeded")
-            return alt_random_response, alternative_provider
-        else:
-            error_msg = f"{alternative_provider} random returned {alt_random_response.status_code}"
-            try:
-                error_body = alt_random_response.json()
-                error_msg += f": {error_body.get('error', 'Unknown error')}"
-            except:
-                error_msg += f": {alt_random_response.text[:200]}"
-            errors.append(error_msg)
-            logging.warning(f"[APPLY_FALLBACK] {error_msg}")
-    except requests.exceptions.RequestException as e:
-        error_msg = f"{alternative_provider} random request failed: {str(e)}"
-        errors.append(error_msg)
-        logging.error(f"[APPLY_FALLBACK] {error_msg}")
+    response, error = _try_apply_request(alternative_provider, port_num, {}, is_random=True)
+    if response:
+        return response, alternative_provider
+    if error:
+        errors.append(error)
     
     # All failed - log all errors
     error_summary = "; ".join(errors)
@@ -149,7 +113,9 @@ def _determine_smart_vpn_provider(check_server, profiles):
     2. Số lượng kết nối hiện tại
     3. Giới hạn kết nối (NordVPN: 10, ProtonVPN: unlimited)
     """
-    return 'protonvpn'
+    return 'protonvpn'  # Simplified: always use ProtonVPN
+    
+    # Code below is disabled but kept for reference
     try:
         # Đếm số lượng kết nối hiện tại cho mỗi provider
         nordvpn_connections = 0
@@ -305,6 +271,86 @@ def _check_gost_running(port, BASE_DIR, max_wait=5):
     except Exception as e:
         return False, f"Error checking Gost status: {str(e)}"
 
+def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
+    """
+    Đợi gost hoạt động sẵn sàng trước khi return
+    Kiểm tra process đang chạy và port đang listen
+    Returns: (is_ready, error_message)
+    """
+    try:
+        import subprocess
+        
+        start_time = time.time()
+        pid_file = os.path.join(BASE_DIR, 'logs', f'gost_{port}.pid')
+        
+        while time.time() - start_time < max_wait:
+            # Kiểm tra PID file
+            if not os.path.exists(pid_file):
+                time.sleep(check_interval)
+                continue
+            
+            try:
+                with open(pid_file, 'r') as f:
+                    pid = f.read().strip()
+                
+                if not pid:
+                    time.sleep(check_interval)
+                    continue
+                
+                # Kiểm tra process có đang chạy không
+                try:
+                    result = subprocess.run(
+                        f'kill -0 {pid}',
+                        shell=True,
+                        capture_output=True,
+                        timeout=2
+                    )
+                except Exception:
+                    time.sleep(check_interval)
+                    continue
+                
+                if result.returncode == 0:
+                    # Process đang chạy, kiểm tra port có đang listen không
+                    try:
+                        # Try lsof first
+                        port_check = subprocess.run(
+                            f'lsof -ti :{port}',
+                            shell=True,
+                            capture_output=True,
+                            timeout=2
+                        )
+                        if port_check.returncode == 0:
+                            try:
+                                stdout_text = port_check.stdout.decode('utf-8', errors='ignore')
+                                if pid in stdout_text.split():
+                                    logging.info(f"[WAIT_GOST] Gost on port {port} is ready (PID: {pid})")
+                                    return True, None
+                            except Exception:
+                                pass
+                        
+                        # Fallback: kiểm tra bằng nc hoặc ss
+                        nc_check = subprocess.run(
+                            f'nc -z 127.0.0.1 {port}',
+                            shell=True,
+                            capture_output=True,
+                            timeout=2
+                        )
+                        if nc_check.returncode == 0:
+                            logging.info(f"[WAIT_GOST] Gost on port {port} is ready (port listening)")
+                            return True, None
+                    except Exception:
+                        pass
+                
+            except Exception:
+                pass
+            
+            time.sleep(check_interval)
+        
+        # Timeout
+        return False, f"Timeout waiting for gost on port {port} to be ready (waited {max_wait}s)"
+    except Exception as e:
+        return False, f"Error waiting for gost: {str(e)}"
+
 def _get_cached_status():
     """Lấy status với caching để giảm API calls"""
     global _status_cache
@@ -332,6 +378,177 @@ def _get_cached_status():
             return _status_cache['data']
     
     return None
+
+def _parse_proxy_string(proxy_str):
+    """
+    Parse proxy string từ format socks5://host:port:server:proxy_port hoặc host:port:server:proxy_port
+    Returns: dict với keys: host, port, server, proxy_port hoặc None nếu invalid
+    """
+    if not proxy_str or proxy_str.strip() == ':':
+        return None
+    
+    # Remove socks5:// prefix if present
+    if proxy_str.startswith('socks5://'):
+        proxy_str = proxy_str[9:]
+    
+    parts = proxy_str.split(':')
+    if len(parts) < 2:
+        return None
+    
+    port = parts[1].strip()
+    if not port or not port.isdigit():
+        return None
+    
+    return {
+        'host': parts[0],
+        'port': port,
+        'server': parts[2] if len(parts) >= 3 else '',
+        'proxy_port': parts[3] if len(parts) >= 4 else ''
+    }
+
+def _extract_used_ports(existing_proxies):
+    """Extract danh sách ports đang được sử dụng từ existing_proxies"""
+    used_ports = []
+    for p in existing_proxies:
+        try:
+            port = int(p['port'])
+            used_ports.append(port)
+        except (ValueError, KeyError):
+            continue
+    return used_ports
+
+def _parse_apply_result(apply_result, check_server):
+    """
+    Parse apply_result để lấy actual_proxy_host và actual_proxy_port
+    Returns: (actual_proxy_host, actual_proxy_port)
+    """
+    if apply_result.get('success'):
+        actual_server = apply_result.get('server', {})
+        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
+        proxy_url = apply_result.get('proxy_url', '')
+        if proxy_url and ':' in proxy_url:
+            try:
+                port_part = proxy_url.split('@')[-1].split(':')[-1]
+                actual_proxy_port = port_part
+            except:
+                actual_proxy_port = '89'
+        else:
+            actual_proxy_port = '89'
+    else:
+        actual_proxy_host = check_server if check_server else 'random-server'
+        actual_proxy_port = '89'
+    return actual_proxy_host, actual_proxy_port
+
+def _wait_and_log_gost_ready(port, BASE_DIR, case_num, max_wait=30):
+    """
+    Đợi gost hoạt động và log kết quả
+    Returns: is_ready (bool)
+    """
+    logging.info(f"[CHROME_PROXY_CHECK] Case {case_num}: Waiting for gost on port {port} to be ready...")
+    is_ready, error_msg = _wait_for_gost_ready(port, BASE_DIR, max_wait=max_wait)
+    if not is_ready:
+        logging.warning(f"[CHROME_PROXY_CHECK] Case {case_num}: Gost on port {port} not ready: {error_msg}, but continuing...")
+    else:
+        logging.info(f"[CHROME_PROXY_CHECK] Case {case_num}: Gost on port {port} is ready")
+    return is_ready
+
+def _apply_server_and_parse(port, apply_data, vpn_provider, check_server):
+    """
+    Apply server và parse response
+    Returns: (success, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg)
+    """
+    apply_response, result = _apply_server_with_fallback(port, apply_data, vpn_provider)
+    if apply_response is None:
+        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
+        return False, None, None, None, error_msg
+    
+    vpn_provider = result
+    apply_result = apply_response.json()
+    actual_proxy_host, actual_proxy_port = _parse_apply_result(apply_result, check_server)
+    return True, actual_proxy_host, actual_proxy_port, vpn_provider, None
+
+def _create_gost_with_retry(gost_port, apply_data, vpn_provider, check_server, used_ports, BASE_DIR, case_num, max_retries=10):
+    """
+    Tạo gost mới với retry logic
+    Returns: (success, gost_port, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg)
+    """
+    import subprocess
+    
+    retry_count = 0
+    gost_created = False
+    actual_proxy_host = None
+    actual_proxy_port = None
+    
+    while retry_count < max_retries:
+        logging.info(f"[CHROME_PROXY_CHECK] Case {case_num}: Attempt {retry_count + 1}/{max_retries} - Applying to port {gost_port} with data: {apply_data}, provider: {vpn_provider}")
+        
+        # Apply server
+        success, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg = _apply_server_and_parse(
+            gost_port, apply_data, vpn_provider, check_server
+        )
+        if not success:
+            return False, gost_port, None, None, None, error_msg
+        
+        # Start Gost service
+        try:
+            result = subprocess.run(
+                f'bash manage_gost.sh restart-port {gost_port}',
+                shell=True,
+                cwd=BASE_DIR,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                is_running, error_msg = _check_gost_running(gost_port, BASE_DIR)
+                if is_running:
+                    gost_created = True
+                    logging.info(f"[CHROME_PROXY_CHECK] Case {case_num}: Gost on port {gost_port} is running")
+                    break
+                else:
+                    logging.warning(f"[CHROME_PROXY_CHECK] Case {case_num}: Gost on port {gost_port} failed to start: {error_msg}")
+                    # Check log file
+                    log_file = os.path.join(BASE_DIR, 'logs', f'gost_{gost_port}.log')
+                    if os.path.exists(log_file):
+                        try:
+                            with open(log_file, 'r') as f:
+                                log_lines = f.readlines()
+                                if log_lines:
+                                    last_lines = ''.join(log_lines[-10:])
+                                    logging.error(f"[CHROME_PROXY_CHECK] Last 10 log lines: {last_lines}")
+                        except:
+                            pass
+            else:
+                # Check if port already in use
+                if 'already' in result.stderr.lower() or 'in use' in result.stderr.lower():
+                    error_msg = f"Port {gost_port} already in use"
+                else:
+                    error_msg = f"restart-port failed: {result.stderr}"
+                    logging.error(f"[CHROME_PROXY_CHECK] Case {case_num}: {error_msg}")
+                    break
+            
+            # Retry with next port
+            retry_count += 1
+            if retry_count < max_retries:
+                old_port = gost_port
+                new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
+                if new_port is None:
+                    return False, gost_port, None, None, None, f'No available Gost ports found. Last error: {error_msg}'
+                gost_port = new_port
+                logging.info(f"[CHROME_PROXY_CHECK] Case {case_num}: Retrying with port {new_port}")
+                continue
+            else:
+                return False, gost_port, None, None, None, f'Failed to start Gost after {max_retries} retries. Last error: {error_msg}'
+                
+        except Exception as e:
+            logging.error(f"[CHROME_PROXY_CHECK] Error starting Gost: {e}")
+            return False, gost_port, None, None, None, str(e)
+    
+    if not gost_created:
+        return False, gost_port, None, None, None, f'Failed to create Gost on port {gost_port}'
+    
+    return True, gost_port, actual_proxy_host, actual_proxy_port, vpn_provider, None
 
 def _find_orphaned_gost_for_port(requested_port):
     """Tìm Gost đang chạy với port yêu cầu"""
@@ -375,14 +592,10 @@ def _find_available_gost(profiles, check_server, vpn_provider, check_proxy_port)
         used_ports = set()
         for profile in profiles:
             if profile.get('proxy'):
-                proxy_str = profile['proxy']
-                if proxy_str.startswith('socks5://'):
-                    proxy_str = proxy_str[9:]
-                parts = proxy_str.split(':')
-                if len(parts) >= 2:
+                parsed_proxy = _parse_proxy_string(profile['proxy'])
+                if parsed_proxy:
                     try:
-                        port = int(parts[1])
-                        used_ports.add(port)
+                        used_ports.add(int(parsed_proxy['port']))
                     except ValueError:
                         pass
         
@@ -520,26 +733,9 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
             existing_proxies = []
             for profile in profiles:
                 if profile.get('proxy'):
-                    proxy_str = profile['proxy']
-                    # Skip invalid proxy strings (empty or just colon)
-                    if not proxy_str or proxy_str.strip() == ':':
-                        continue
-                    
-                    # Parse socks5://host:port:server:proxy_port format
-                    if proxy_str.startswith('socks5://'):
-                        proxy_str = proxy_str[9:]
-                    
-                    parts = proxy_str.split(':')
-                    if len(parts) >= 2:
-                        # Validate port is a valid integer before adding
-                        port = parts[1].strip()
-                        if port and port.isdigit():
-                            existing_proxies.append({
-                                'host': parts[0],
-                                'port': port,
-                                'server': parts[2] if len(parts) >= 3 else '',
-                                'proxy_port': parts[3] if len(parts) >= 4 else ''
-                            })
+                    parsed_proxy = _parse_proxy_string(profile['proxy'])
+                    if parsed_proxy:
+                        existing_proxies.append(parsed_proxy)
             
             # So sánh proxy_check với các proxy của profiles
             exact_match = None
@@ -576,13 +772,23 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
             logging.info(f"[CHROME_PROXY_CHECK] Processing cases...")
             
             if exact_match:
-                # 1. Nếu proxy_check = proxy thì return lại proxy
+                # 1. Nếu proxy_check = proxy thì return lại proxy - đợi gost hoạt động
                 logging.info(f"[CHROME_PROXY_CHECK] Case 1: Exact match found")
+                try:
+                    exact_port = int(exact_match["port"])
+                    _wait_and_log_gost_ready(exact_port, BASE_DIR, 1, max_wait=15)
+                except (ValueError, KeyError):
+                    logging.warning(f"[CHROME_PROXY_CHECK] Case 1: Could not parse port, skipping wait")
                 return f'socks5://{exact_match["host"]}:{exact_match["port"]}:{exact_match["server"]}:{exact_match["proxy_port"]}'
             
             elif different_gost_port_same_server:
-                # 2. Khác port gost, proxy_host và proxy_port giống nhau thì return lại proxy
+                # 2. Khác port gost, proxy_host và proxy_port giống nhau thì return lại proxy - đợi gost hoạt động
                 logging.info(f"[CHROME_PROXY_CHECK] Case 2: Different port, same server")
+                try:
+                    diff_port = int(different_gost_port_same_server["port"])
+                    _wait_and_log_gost_ready(diff_port, BASE_DIR, 2, max_wait=15)
+                except (ValueError, KeyError):
+                    logging.warning(f"[CHROME_PROXY_CHECK] Case 2: Could not parse port, skipping wait")
                 return f'socks5://{different_gost_port_same_server["host"]}:{different_gost_port_same_server["port"]}:{different_gost_port_same_server["server"]}:{different_gost_port_same_server["proxy_port"]}'
             
             elif same_gost_port_different_server:
@@ -593,53 +799,27 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                 if available_gost:
                     # Sử dụng lại Gost đang rảnh
                     gost_port = available_gost['port']
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using available Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using available Gost port: {gost_port}")
                     
                     # Apply Gost với dữ liệu đã phân tích
                     logging.info(f"[CHROME_PROXY_CHECK] Case 3: Applying server to port {gost_port} with data: {apply_data}, provider: {vpn_provider}")
-                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                    if apply_response is None:
-                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
+                    success, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg = _apply_server_and_parse(
+                        gost_port, apply_data, vpn_provider, check_server
+                    )
+                    if not success:
                         logging.error(f"[CHROME_PROXY_CHECK] Case 3: Failed to apply server: {error_msg}")
                         return jsonify({
                             'success': False,
                             'error': f'Failed to apply server: {error_msg}'
                         }), 500
-                    vpn_provider = result
                     logging.info(f"[CHROME_PROXY_CHECK] Case 3: Successfully applied server, provider: {vpn_provider}")
                     
-                    # Parse response để lấy thông tin server thực tế
-                    apply_result = apply_response.json()
-                    if apply_result.get('success'):
-                        actual_server = apply_result.get('server', {})
-                        # Sử dụng hostname hoặc domain tùy theo VPN provider
-                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                        # Parse port từ proxy_url hoặc sử dụng default
-                        proxy_url = apply_result.get('proxy_url', '')
-                        if proxy_url and ':' in proxy_url:
-                            try:
-                                # Parse port từ proxy_url (format: https://user:pass@host:port)
-                                port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                actual_proxy_port = port_part
-                            except:
-                                actual_proxy_port = '89'
-                        else:
-                            actual_proxy_port = '89'
-                    else:
-                        # Fallback nếu không parse được
-                        actual_proxy_host = check_server if check_server else 'random-server'
-                        actual_proxy_port = '89'
-                    
+                    # Đợi gost hoạt động trước khi return (vì đã apply server mới)
+                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=30)
                     return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có Gost rảnh, kiểm tra orphaned Gost hoặc tạo mới
-                used_ports = []
-                for p in existing_proxies:
-                    try:
-                        port = int(p['port'])
-                        used_ports.append(port)
-                    except (ValueError, KeyError):
-                        continue  # Skip invalid ports
+                used_ports = _extract_used_ports(existing_proxies)
                 
                 # Kiểm tra xem có Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
@@ -663,120 +843,20 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
                 
-                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using new Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Using new Gost port: {gost_port}")
                 
-                # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
-                max_retries = 10
-                retry_count = 0
-                gost_created = False
-                
-                while retry_count < max_retries:
-                    # Apply Gost với port mới
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Attempt {retry_count + 1}/{max_retries} - Applying to port {gost_port} with data: {apply_data}, provider: {vpn_provider}")
-                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                    if apply_response is None:
-                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
-                        return jsonify({
-                            'success': False,
-                            'error': f'Failed to apply server: {error_msg}'
-                        }), 500
-                    vpn_provider = result
-                    
-                    # Parse response để lấy thông tin server thực tế
-                    apply_result = apply_response.json()
-                    if apply_result.get('success'):
-                        actual_server = apply_result.get('server', {})
-                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                        proxy_url = apply_result.get('proxy_url', '')
-                        if proxy_url and ':' in proxy_url:
-                            try:
-                                port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                actual_proxy_port = port_part
-                            except:
-                                actual_proxy_port = '89'
-                        else:
-                            actual_proxy_port = '89'
-                    else:
-                        actual_proxy_host = check_server if check_server else 'random-server'
-                        actual_proxy_port = '89'
-                    
-                    # Kiểm tra xem Gost đã được tạo và chạy chưa
-                    try:
-                        # Start Gost service
-                        import subprocess
-                        result = subprocess.run(
-                            f'bash manage_gost.sh restart-port {gost_port}',
-                            shell=True,
-                            cwd=BASE_DIR,
-                            capture_output=True,
-                            text=True,
-                            timeout=30
-                        )
-                        if result.returncode == 0:
-                            # Kiểm tra xem Gost có thực sự đang chạy không
-                            is_running, error_msg = _check_gost_running(gost_port, BASE_DIR)
-                            if is_running:
-                                gost_created = True
-                                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Gost on port {gost_port} is running")
-                                break
-                            else:
-                                logging.warning(f"[CHROME_PROXY_CHECK] Case 3: Gost on port {gost_port} failed to start: {error_msg}")
-                                # Kiểm tra log để xem có lỗi gì không
-                                log_file = os.path.join(BASE_DIR, 'logs', f'gost_{gost_port}.log')
-                                if os.path.exists(log_file):
-                                    try:
-                                        with open(log_file, 'r') as f:
-                                            log_lines = f.readlines()
-                                            if log_lines:
-                                                last_lines = ''.join(log_lines[-10:])
-                                                logging.error(f"[CHROME_PROXY_CHECK] Last 10 log lines: {last_lines}")
-                                    except:
-                                        pass
-                                # Retry với port khác
-                                retry_count += 1
-                                if retry_count < max_retries:
-                                    old_port = gost_port
-                                    new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                                    if new_port is None:
-                                        return jsonify({
-                                            'success': False,
-                                            'error': f'No available Gost ports found. Last error: {error_msg}'
-                                        }), 500
-                                    gost_port = new_port
-                                    logging.info(f"[CHROME_PROXY_CHECK] Case 3: Retrying with port {new_port}")
-                                    continue
-                                else:
-                                    return jsonify({
-                                        'success': False,
-                                        'error': f'Failed to start Gost after {max_retries} retries. Last error: {error_msg}'
-                                    }), 500
-                        else:
-                            # Kiểm tra xem có phải lỗi port đã được sử dụng không
-                            if 'already' in result.stderr.lower() or 'in use' in result.stderr.lower():
-                                retry_count += 1
-                                old_port = gost_port
-                                new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                                if new_port is None:
-                                    return jsonify({
-                                        'success': False,
-                                        'error': 'No available Gost ports found after retries'
-                                    }), 500
-                                gost_port = new_port
-                                logging.info(f"[CHROME_PROXY_CHECK] Case 3: Port {old_port} already exists, retrying with port {new_port}")
-                                continue
-                            else:
-                                logging.error(f"[CHROME_PROXY_CHECK] Case 3: restart-port failed: {result.stderr}")
-                                break
-                    except Exception as e:
-                        logging.error(f"[CHROME_PROXY_CHECK] Error starting Gost: {e}")
-                        break
-                
-                if not gost_created:
+                # Tạo gost mới với retry logic
+                success, gost_port, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg = _create_gost_with_retry(
+                    gost_port, apply_data, vpn_provider, check_server, used_ports, BASE_DIR, 3
+                )
+                if not success:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to create Gost on port {gost_port}'
+                        'error': error_msg
                     }), 500
                 
+                # Đợi gost hoạt động trước khi return
+                _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=30)
                 return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
             else:
@@ -787,59 +867,34 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                 if available_gost:
                     # Sử dụng lại Gost đang rảnh
                     gost_port = available_gost['port']
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using available Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using available Gost port: {gost_port}")
                     
                     # Kiểm tra xem có phải cùng server không
                     if available_gost.get('same_server'):
-                        # Cùng server, tái sử dụng trực tiếp
+                        # Cùng server, tái sử dụng trực tiếp - đợi gost hoạt động
                         logging.info(f"[CHROME_PROXY_CHECK] Reusing Gost {gost_port} with same server {check_server}")
+                        _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=15)
                         return f'socks5://{client_host}:{gost_port}:{check_server}:{check_proxy_port}'
                     
                     # Khác server, apply Gost với dữ liệu đã phân tích
                     logging.info(f"[CHROME_PROXY_CHECK] Case 4: Applying server to port {gost_port} with data: {apply_data}, provider: {vpn_provider}")
-                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                    if apply_response is None:
-                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
+                    success, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg = _apply_server_and_parse(
+                        gost_port, apply_data, vpn_provider, check_server
+                    )
+                    if not success:
                         logging.error(f"[CHROME_PROXY_CHECK] Case 4: Failed to apply server: {error_msg}")
                         return jsonify({
                             'success': False,
                             'error': f'Failed to apply server: {error_msg}'
                         }), 500
-                    vpn_provider = result
                     logging.info(f"[CHROME_PROXY_CHECK] Case 4: Successfully applied server, provider: {vpn_provider}")
                     
-                    # Parse response để lấy thông tin server thực tế
-                    apply_result = apply_response.json()
-                    if apply_result.get('success'):
-                        actual_server = apply_result.get('server', {})
-                        # Sử dụng hostname hoặc domain tùy theo VPN provider
-                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                        # Parse port từ proxy_url hoặc sử dụng default
-                        proxy_url = apply_result.get('proxy_url', '')
-                        if proxy_url and ':' in proxy_url:
-                            try:
-                                # Parse port từ proxy_url (format: https://user:pass@host:port)
-                                port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                actual_proxy_port = port_part
-                            except:
-                                actual_proxy_port = '89'
-                        else:
-                            actual_proxy_port = '89'
-                    else:
-                        # Fallback nếu không parse được
-                        actual_proxy_host = check_server if check_server else 'random-server'
-                        actual_proxy_port = '89'
-                    
+                    # Đợi gost hoạt động trước khi return (vì đã apply server mới)
+                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=30)
                     return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có Gost rảnh, kiểm tra Gost đang chạy hoặc tạo mới
-                used_ports = []
-                for p in existing_proxies:
-                    try:
-                        port = int(p['port'])
-                        used_ports.append(port)
-                    except (ValueError, KeyError):
-                        continue  # Skip invalid ports
+                used_ports = _extract_used_ports(existing_proxies)
                 
                 # Kiểm tra xem có Gost phù hợp với port yêu cầu không
                 requested_port = int(check_port)
@@ -863,120 +918,20 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     # Gost port = new_port (chạy trực tiếp trên 789x)
                     gost_port = new_port
                 
-                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using new Gost port: {gost_port} (type: {type(gost_port).__name__})")
+                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Using new Gost port: {gost_port}")
                 
-                # Apply Gost với dữ liệu đã phân tích, tự động retry với port tiếp theo nếu port đã tồn tại
-                max_retries = 10
-                retry_count = 0
-                gost_created = False
-                
-                while retry_count < max_retries:
-                    # Apply Gost với port mới
-                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Attempt {retry_count + 1}/{max_retries} - Applying to port {gost_port} with data: {apply_data}, provider: {vpn_provider}")
-                    apply_response, result = _apply_server_with_fallback(gost_port, apply_data, vpn_provider)
-                    if apply_response is None:
-                        error_msg = result if isinstance(result, str) else 'Failed to apply server to both providers'
-                        return jsonify({
-                            'success': False,
-                            'error': f'Failed to apply server: {error_msg}'
-                        }), 500
-                    vpn_provider = result
-                    
-                    # Parse response để lấy thông tin server thực tế
-                    apply_result = apply_response.json()
-                    if apply_result.get('success'):
-                        actual_server = apply_result.get('server', {})
-                        actual_proxy_host = actual_server.get('hostname') or actual_server.get('domain', check_server if check_server else 'random-server')
-                        proxy_url = apply_result.get('proxy_url', '')
-                        if proxy_url and ':' in proxy_url:
-                            try:
-                                port_part = proxy_url.split('@')[-1].split(':')[-1]
-                                actual_proxy_port = port_part
-                            except:
-                                actual_proxy_port = '89'
-                        else:
-                            actual_proxy_port = '89'
-                    else:
-                        actual_proxy_host = check_server if check_server else 'random-server'
-                        actual_proxy_port = '89'
-                    
-                    # Kiểm tra xem Gost đã được tạo và chạy chưa
-                    try:
-                        # Start Gost service
-                        import subprocess
-                        result = subprocess.run(
-                            f'bash manage_gost.sh restart-port {gost_port}',
-                            shell=True,
-                            cwd=BASE_DIR,
-                            capture_output=True,
-                            text=True,
-                            timeout=30
-                        )
-                        if result.returncode == 0:
-                            # Kiểm tra xem Gost có thực sự đang chạy không
-                            is_running, error_msg = _check_gost_running(gost_port, BASE_DIR)
-                            if is_running:
-                                gost_created = True
-                                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Gost on port {gost_port} is running")
-                                break
-                            else:
-                                logging.warning(f"[CHROME_PROXY_CHECK] Case 4: Gost on port {gost_port} failed to start: {error_msg}")
-                                # Kiểm tra log để xem có lỗi gì không
-                                log_file = os.path.join(BASE_DIR, 'logs', f'gost_{gost_port}.log')
-                                if os.path.exists(log_file):
-                                    try:
-                                        with open(log_file, 'r') as f:
-                                            log_lines = f.readlines()
-                                            if log_lines:
-                                                last_lines = ''.join(log_lines[-10:])
-                                                logging.error(f"[CHROME_PROXY_CHECK] Last 10 log lines: {last_lines}")
-                                    except:
-                                        pass
-                                # Retry với port khác
-                                retry_count += 1
-                                if retry_count < max_retries:
-                                    old_port = gost_port
-                                    new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                                    if new_port is None:
-                                        return jsonify({
-                                            'success': False,
-                                            'error': f'No available Gost ports found. Last error: {error_msg}'
-                                        }), 500
-                                    gost_port = new_port
-                                    logging.info(f"[CHROME_PROXY_CHECK] Case 4: Retrying with port {new_port}")
-                                    continue
-                                else:
-                                    return jsonify({
-                                        'success': False,
-                                        'error': f'Failed to start Gost after {max_retries} retries. Last error: {error_msg}'
-                                    }), 500
-                        else:
-                            # Kiểm tra xem có phải lỗi port đã được sử dụng không
-                            if 'already' in result.stderr.lower() or 'in use' in result.stderr.lower():
-                                retry_count += 1
-                                old_port = gost_port
-                                new_port = _find_available_port(old_port + 1, used_ports, BASE_DIR)
-                                if new_port is None:
-                                    return jsonify({
-                                        'success': False,
-                                        'error': 'No available Gost ports found after retries'
-                                    }), 500
-                                gost_port = new_port
-                                logging.info(f"[CHROME_PROXY_CHECK] Case 4: Port {old_port} already exists, retrying with port {new_port}")
-                                continue
-                            else:
-                                logging.error(f"[CHROME_PROXY_CHECK] Case 4: restart-port failed: {result.stderr}")
-                                break
-                    except Exception as e:
-                        logging.error(f"[CHROME_PROXY_CHECK] Error starting Gost: {e}")
-                        break
-                
-                if not gost_created:
+                # Tạo gost mới với retry logic
+                success, gost_port, actual_proxy_host, actual_proxy_port, vpn_provider, error_msg = _create_gost_with_retry(
+                    gost_port, apply_data, vpn_provider, check_server, used_ports, BASE_DIR, 4
+                )
+                if not success:
                     return jsonify({
                         'success': False,
-                        'error': f'Failed to create Gost on port {gost_port}'
+                        'error': error_msg
                     }), 500
                 
+                # Đợi gost hoạt động trước khi return
+                _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=30)
                 return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
         except Exception as e:

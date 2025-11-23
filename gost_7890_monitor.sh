@@ -82,7 +82,7 @@ restart_gost() {
     # Khởi động lại Gost
     if [ -f "./manage_gost.sh" ]; then
         chmod +x manage_gost.sh
-        ./manage_gost.sh start-port 7890 >> "$LOG_DIR/gost_7890_restart.log" 2>&1 || {
+        ./manage_gost.sh restart-port 7890 >> "$LOG_DIR/gost_7890_restart.log" 2>&1 || {
             log "❌ Failed to restart Gost 7890"
             return 1
         }

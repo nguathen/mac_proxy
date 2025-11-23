@@ -300,7 +300,7 @@ class AutoCredentialUpdater:
             
             # API 1: localhost
             try:
-                response1 = requests.get("https://btmg25.ddns.net/api/profiles/count-open", timeout=10)
+                response1 = requests.get("https://g.proxyit.online/api/profiles/count-open", timeout=10)
                 if response1.status_code == 200:
                     data1 = response1.json()
                     if isinstance(data1, list):
@@ -316,7 +316,7 @@ class AutoCredentialUpdater:
             
             # API 2: btm2025.ddns.net
             try:
-                response2 = requests.get("https://btmg25.ddns.net/api/profiles/count-open", timeout=10)
+                response2 = requests.get("https://g.proxyit.online/api/profiles/count-open", timeout=10)
                 if response2.status_code == 200:
                     data2 = response2.json()
                     if isinstance(data2, list):
