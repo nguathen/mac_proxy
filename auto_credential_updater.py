@@ -295,13 +295,17 @@ class AutoCredentialUpdater:
         """Dọn dẹp các service không sử dụng dựa trên profile count API"""
         try:
             used_ports = self._fetch_used_ports_from_api()
+            if used_ports is None:
+                print(f"⚠️  Skipping cleanup: API call failed or returned invalid data")
+                return
+            
             print(f"🔍 Total unique used ports: {len(used_ports)} - {sorted(used_ports)}")
             self._cleanup_unused_gost_services(used_ports)
         except Exception as e:
             print(f"❌ Error in cleanup unused services: {e}")
     
-    def _fetch_used_ports_from_api(self) -> Set[int]:
-        """Lấy danh sách ports đang được sử dụng từ API"""
+    def _fetch_used_ports_from_api(self) -> Optional[Set[int]]:
+        """Lấy danh sách ports đang được sử dụng từ API. Trả về None nếu API lỗi."""
         used_ports: Set[int] = set()
         
         try:
@@ -313,14 +317,22 @@ class AutoCredentialUpdater:
                     ports = self._extract_ports_from_profiles(data)
                     used_ports.update(ports)
                     print(f"🔍 API: Found {len(ports)} used ports: {sorted(ports)}")
+                    return used_ports
                 else:
                     print(f"❌ API unexpected format: {type(data)}, data: {data}")
+                    return None
             else:
                 print(f"❌ API failed: {response.status_code}")
-        except Exception as e:
+                return None
+        except requests.exceptions.Timeout:
+            print(f"❌ API timeout after {API_TIMEOUT_SECONDS} seconds")
+            return None
+        except requests.exceptions.RequestException as e:
             print(f"❌ Error calling API: {e}")
-        
-        return used_ports
+            return None
+        except Exception as e:
+            print(f"❌ Unexpected error calling API: {e}")
+            return None
             
     def _extract_ports_from_profiles(self, profiles: List[Dict]) -> Set[int]:
         """Trích xuất ports từ danh sách profiles"""

@@ -9,6 +9,9 @@ config/
 # Logs
 logs/
 *.pyc
+*.pyo
+*.pyd
+__pycache__/
 *.log
 
 # PID files
