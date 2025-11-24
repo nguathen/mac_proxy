@@ -30,7 +30,7 @@ def _try_apply_request(provider, port_num, apply_data, is_random=False):
     
     try:
         logging.info(f"[APPLY_FALLBACK] Trying {provider} with {data_label}: {apply_data if not is_random else '{}'}")
-        response = requests.post(apply_url, json=apply_data, timeout=15)
+        response = requests.post(apply_url, json=apply_data, timeout=5)
         if response.status_code == 200:
             logging.info(f"[APPLY_FALLBACK] ✅ {provider} succeeded with {data_label}")
             return response, None
@@ -213,8 +213,8 @@ def _check_gost_running(port, BASE_DIR, max_wait=5):
     try:
         import subprocess
         
-        # Đợi một chút để Gost khởi động
-        time.sleep(2)
+        # Đợi một chút để Gost khởi động (giảm từ 2s xuống 1s)
+        time.sleep(1)
         
         # Kiểm tra PID file
         pid_file = os.path.join(BASE_DIR, 'logs', f'gost_{port}.pid')
@@ -234,14 +234,14 @@ def _check_gost_running(port, BASE_DIR, max_wait=5):
                     f'kill -0 {pid}',
                     shell=True,
                     capture_output=True,
-                    timeout=2
+                    timeout=1
                 )
             except Exception as e:
                 return False, f"Error checking process: {str(e)}"
             
             if result.returncode == 0:
                 # Process đang chạy, kiểm tra thêm port có đang listen không
-                time.sleep(1)  # Đợi thêm một chút để port được bind
+                time.sleep(0.5)  # Đợi thêm một chút để port được bind (giảm từ 1s xuống 0.5s)
                 
                 # Kiểm tra port có đang listen không (optional check)
                 try:
@@ -250,7 +250,7 @@ def _check_gost_running(port, BASE_DIR, max_wait=5):
                         f'lsof -ti :{port}',
                         shell=True,
                         capture_output=True,
-                        timeout=2
+                        timeout=1
                     )
                     if port_check.returncode == 0:
                         try:
@@ -271,7 +271,7 @@ def _check_gost_running(port, BASE_DIR, max_wait=5):
     except Exception as e:
         return False, f"Error checking Gost status: {str(e)}"
 
-def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
+def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=0.5):
     """
     Đợi gost hoạt động sẵn sàng trước khi return
     Kiểm tra process đang chạy và port đang listen
@@ -283,6 +283,57 @@ def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
         start_time = time.time()
         pid_file = os.path.join(BASE_DIR, 'logs', f'gost_{port}.pid')
         
+        # Quick check first - if Gost is already running, return immediately
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, 'r') as f:
+                    pid = f.read().strip()
+                
+                if pid:
+                    # Quick process check
+                    try:
+                        result = subprocess.run(
+                            f'kill -0 {pid}',
+                            shell=True,
+                            capture_output=True,
+                            timeout=1
+                        )
+                        if result.returncode == 0:
+                            # Quick port check
+                            try:
+                                port_check = subprocess.run(
+                                    f'lsof -ti :{port}',
+                                    shell=True,
+                                    capture_output=True,
+                                    timeout=1
+                                )
+                                if port_check.returncode == 0:
+                                    try:
+                                        stdout_text = port_check.stdout.decode('utf-8', errors='ignore')
+                                        if pid in stdout_text.split():
+                                            logging.info(f"[WAIT_GOST] Gost on port {port} is ready (quick check)")
+                                            return True, None
+                                    except Exception:
+                                        pass
+                                
+                                # Fallback: nc check
+                                nc_check = subprocess.run(
+                                    f'nc -z 127.0.0.1 {port}',
+                                    shell=True,
+                                    capture_output=True,
+                                    timeout=1
+                                )
+                                if nc_check.returncode == 0:
+                                    logging.info(f"[WAIT_GOST] Gost on port {port} is ready (quick check)")
+                                    return True, None
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        
+        # If quick check failed, do full wait loop
         while time.time() - start_time < max_wait:
             # Kiểm tra PID file
             if not os.path.exists(pid_file):
@@ -303,7 +354,7 @@ def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
                         f'kill -0 {pid}',
                         shell=True,
                         capture_output=True,
-                        timeout=2
+                        timeout=1
                     )
                 except Exception:
                     time.sleep(check_interval)
@@ -317,7 +368,7 @@ def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
                             f'lsof -ti :{port}',
                             shell=True,
                             capture_output=True,
-                            timeout=2
+                            timeout=1
                         )
                         if port_check.returncode == 0:
                             try:
@@ -333,7 +384,7 @@ def _wait_for_gost_ready(port, BASE_DIR, max_wait=30, check_interval=1):
                             f'nc -z 127.0.0.1 {port}',
                             shell=True,
                             capture_output=True,
-                            timeout=2
+                            timeout=1
                         )
                         if nc_check.returncode == 0:
                             logging.info(f"[WAIT_GOST] Gost on port {port} is ready (port listening)")
@@ -363,7 +414,7 @@ def _get_cached_status():
     
     # Fetch mới
     try:
-        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=10)
+        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=3)
         if status_response.status_code == 200:
             status_data = status_response.json()
             _status_cache = {
@@ -776,7 +827,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                 logging.info(f"[CHROME_PROXY_CHECK] Case 1: Exact match found")
                 try:
                     exact_port = int(exact_match["port"])
-                    _wait_and_log_gost_ready(exact_port, BASE_DIR, 1, max_wait=15)
+                    _wait_and_log_gost_ready(exact_port, BASE_DIR, 1, max_wait=3)
                 except (ValueError, KeyError):
                     logging.warning(f"[CHROME_PROXY_CHECK] Case 1: Could not parse port, skipping wait")
                 return f'socks5://{exact_match["host"]}:{exact_match["port"]}:{exact_match["server"]}:{exact_match["proxy_port"]}'
@@ -786,7 +837,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                 logging.info(f"[CHROME_PROXY_CHECK] Case 2: Different port, same server")
                 try:
                     diff_port = int(different_gost_port_same_server["port"])
-                    _wait_and_log_gost_ready(diff_port, BASE_DIR, 2, max_wait=15)
+                    _wait_and_log_gost_ready(diff_port, BASE_DIR, 2, max_wait=3)
                 except (ValueError, KeyError):
                     logging.warning(f"[CHROME_PROXY_CHECK] Case 2: Could not parse port, skipping wait")
                 return f'socks5://{different_gost_port_same_server["host"]}:{different_gost_port_same_server["port"]}:{different_gost_port_same_server["server"]}:{different_gost_port_same_server["proxy_port"]}'
@@ -815,7 +866,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     logging.info(f"[CHROME_PROXY_CHECK] Case 3: Successfully applied server, provider: {vpn_provider}")
                     
                     # Đợi gost hoạt động trước khi return (vì đã apply server mới)
-                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=30)
+                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=5)
                     return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có Gost rảnh, kiểm tra orphaned Gost hoặc tạo mới
@@ -856,7 +907,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     }), 500
                 
                 # Đợi gost hoạt động trước khi return
-                _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=30)
+                _wait_and_log_gost_ready(gost_port, BASE_DIR, 3, max_wait=8)
                 return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
             else:
@@ -873,7 +924,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     if available_gost.get('same_server'):
                         # Cùng server, tái sử dụng trực tiếp - đợi gost hoạt động
                         logging.info(f"[CHROME_PROXY_CHECK] Reusing Gost {gost_port} with same server {check_server}")
-                        _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=15)
+                        _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=3)
                         return f'socks5://{client_host}:{gost_port}:{check_server}:{check_proxy_port}'
                     
                     # Khác server, apply Gost với dữ liệu đã phân tích
@@ -890,7 +941,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     logging.info(f"[CHROME_PROXY_CHECK] Case 4: Successfully applied server, provider: {vpn_provider}")
                     
                     # Đợi gost hoạt động trước khi return (vì đã apply server mới)
-                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=30)
+                    _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=5)
                     return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
                 
                 # Nếu không có Gost rảnh, kiểm tra Gost đang chạy hoặc tạo mới
@@ -931,7 +982,7 @@ def register_chrome_routes(app, BASE_DIR, get_available_gost_ports, _get_proxy_p
                     }), 500
                 
                 # Đợi gost hoạt động trước khi return
-                _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=30)
+                _wait_and_log_gost_ready(gost_port, BASE_DIR, 4, max_wait=8)
                 return f'socks5://{client_host}:{gost_port}:{actual_proxy_host}:{actual_proxy_port}'
             
         except Exception as e:

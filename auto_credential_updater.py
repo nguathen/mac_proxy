@@ -339,32 +339,58 @@ class AutoCredentialUpdater:
         ports: Set[int] = set()
         for profile in profiles:
             proxy = profile.get('proxy', '')
-            if not proxy or ':' not in proxy:
+            profile_id = profile.get('id', 'unknown')
+            profile_name = profile.get('name', 'unknown')
+            
+            # Skip empty or None proxy
+            if not proxy:
+                continue
+            
+            # Skip proxy không có format hợp lệ (phải có ít nhất host:port)
+            if ':' not in proxy:
+                print(f"⚠️  Profile {profile_id} ({profile_name}): invalid proxy format (no ':'): '{proxy}'")
+                continue
+            
+            # Kiểm tra proxy bắt đầu bằng ':' (thiếu host) - sau khi remove socks5:// prefix
+            proxy_check = proxy[9:] if proxy.startswith('socks5://') else proxy
+            if proxy_check.startswith(':'):
+                print(f"⚠️  Profile {profile_id} ({profile_name}): invalid proxy format (missing host): '{proxy}'")
                 continue
             
             port = self._parse_port_from_proxy(proxy)
             if port:
                 ports.add(port)
-                profile_id = profile.get('id', 'unknown')
-                profile_name = profile.get('name', 'unknown')
                 print(f"✅ Profile {profile_id} ({profile_name}): extracted port {port} from proxy '{proxy}'")
+            else:
+                print(f"⚠️  Profile {profile_id} ({profile_name}): could not extract valid port from proxy '{proxy}'")
         return ports
     
     @staticmethod
     def _parse_port_from_proxy(proxy: str) -> Optional[int]:
         """Parse port từ proxy string: socks5://host:PORT:server:proxy_port"""
         try:
+            # Skip empty proxy
+            if not proxy or not proxy.strip():
+                return None
+            
             # Remove socks5:// prefix
             proxy_str = proxy[9:] if proxy.startswith('socks5://') else proxy
+            
+            # Skip nếu proxy_str rỗng hoặc bắt đầu bằng ':' (thiếu host)
+            if not proxy_str or proxy_str.startswith(':'):
+                return None
+            
             parts = proxy_str.split(':')
             
             if len(parts) >= 2:
                 port_str = parts[1].strip()
-                if port_str.isdigit():
+                # Kiểm tra port_str không rỗng và là số
+                if port_str and port_str.isdigit():
                     port = int(port_str)
                     if GOST_PORT_MIN <= port <= GOST_PORT_MAX:
                         return port
-        except (ValueError, IndexError):
+        except (ValueError, IndexError, AttributeError) as e:
+            # Log lỗi nếu cần debug
             pass
         return None
             
