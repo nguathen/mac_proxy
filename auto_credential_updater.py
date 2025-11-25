@@ -426,9 +426,27 @@ class AutoCredentialUpdater:
             print(f"🛡️  Protecting Gost {port} (directly used in used_ports)")
             return True
         
+        # Chỉ bảo vệ process đang chạy nếu nó mới tạo (< 5 phút) để tránh xóa process đang được setup
         if self._is_gost_process_running(port):
-            print(f"🛡️  Protecting Gost {port} (process is running, may be in use)")
-            return True
+            config_file = os.path.join(self.config_dir, f"gost_{port}.config")
+            if os.path.exists(config_file):
+                try:
+                    age_seconds = self._get_service_age(config_file)
+                    if age_seconds < MIN_SERVICE_AGE_SECONDS:
+                        print(f"🛡️  Protecting Gost {port} (process running, created {int(age_seconds/60)} min ago, too recent)")
+                        return True
+                    else:
+                        # Process đang chạy nhưng đã > 5 phút và không có profile sử dụng -> không bảo vệ
+                        print(f"⚠️  Gost {port} process running but not in used_ports and age {int(age_seconds/60)} min, allowing cleanup check")
+                        return False
+                except Exception as e:
+                    # Nếu có lỗi kiểm tra tuổi, bảo vệ để an toàn
+                    print(f"🛡️  Protecting Gost {port} (process running, error checking age: {e})")
+                    return True
+            else:
+                # Process đang chạy nhưng không có config file -> không bảo vệ
+                print(f"⚠️  Gost {port} process running but no config file, allowing cleanup")
+                return False
         
         return False
     

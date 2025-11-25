@@ -30,7 +30,7 @@ def _try_apply_request(provider, port_num, apply_data, is_random=False):
     
     try:
         logging.info(f"[APPLY_FALLBACK] Trying {provider} with {data_label}: {apply_data if not is_random else '{}'}")
-        response = requests.post(apply_url, json=apply_data, timeout=5)
+        response = requests.post(apply_url, json=apply_data, timeout=60)
         if response.status_code == 200:
             logging.info(f"[APPLY_FALLBACK] ✅ {provider} succeeded with {data_label}")
             return response, None
@@ -414,7 +414,7 @@ def _get_cached_status():
     
     # Fetch mới
     try:
-        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=3)
+        status_response = requests.get('http://127.0.0.1:5000/api/status', timeout=30)
         if status_response.status_code == 200:
             status_data = status_response.json()
             _status_cache = {
@@ -548,7 +548,7 @@ def _create_gost_with_retry(gost_port, apply_data, vpn_provider, check_server, u
                 cwd=BASE_DIR,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=60
             )
             
             if result.returncode == 0:

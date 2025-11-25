@@ -373,7 +373,7 @@ EOF
                             forwarder_url="${forwarder_url#https://}"
                             forwarder_url="http+tls://${forwarder_url}"
                         fi
-                        local forwarder_opts="${forwarder_url}?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                        local forwarder_opts="${forwarder_url}?ttl=120s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -595,7 +595,7 @@ restart_gost_port() {
                     forwarder_url="${forwarder_url#https://}"
                     forwarder_url="http+tls://${forwarder_url}"
                 fi
-                local forwarder_opts="${forwarder_url}?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                local forwarder_opts="${forwarder_url}?ttl=120s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"

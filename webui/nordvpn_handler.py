@@ -170,7 +170,7 @@ def register_nordvpn_routes(app, save_gost_config, run_command, trigger_health_c
                 used_proxies = set()
                 try:
                     import requests
-                    response = requests.get("https://g.proxyit.online/api/profiles/list-proxy", timeout=5)
+                    response = requests.get("https://g.proxyit.online/api/profiles/list-proxy", timeout=10)
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, dict) and 'data' in data:

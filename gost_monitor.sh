@@ -57,8 +57,8 @@ check_gost_proxy() {
     else
         # Kiểm tra proxy có hoạt động không (với timeout tối ưu cho ProtonVPN)
         # Tăng timeout lên để phù hợp với ProtonVPN (có thể chậm hơn do distance)
-        # Dùng curl với timeout options: connect-timeout 8s, max-time 12s
-        if curl -s --connect-timeout 8 --max-time 12 -x socks5h://127.0.0.1:$port https://ipinfo.io/ip >/dev/null 2>&1; then
+        # Dùng curl với timeout options: connect-timeout 15s, max-time 20s (tăng từ 8s/12s)
+        if curl -s --connect-timeout 15 --max-time 20 -x socks5h://127.0.0.1:$port https://ipinfo.io/ip >/dev/null 2>&1; then
             return 0  # Working
         else
             return 1  # Not working
@@ -134,8 +134,8 @@ get_gost_ports() {
 monitor_loop() {
     log "🛡️  Gost monitor started (check interval: ${CHECK_INTERVAL}s)"
     
-    local reconnect_cooldown=60  # Cooldown 1 phút sau mỗi lần restart (giảm từ 2 phút)
-    local max_failures=2  # Sau 2 lần kiểm tra thất bại mới restart (giảm từ 3 để restart nhanh hơn)
+    local reconnect_cooldown=120  # Cooldown 2 phút sau mỗi lần restart (tăng từ 1 phút để tránh restart quá nhanh)
+    local max_failures=3  # Sau 3 lần kiểm tra thất bại mới restart (tăng từ 2 để tránh restart quá nhanh)
     
     # Initialize failure counters for each port
     local ports=$(get_gost_ports)

@@ -161,6 +161,90 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                 'error': str(e)
             }), 500
 
+    @app.route('/api/protonvpn/random-proxy')
+    def api_protonvpn_random_proxy():
+        """Trả về random một HTTPS proxy của ProtonVPN với format https://username:pass@host:port"""
+        try:
+            if not protonvpn_api:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN API not configured'
+                }), 400
+            
+            # Lấy tất cả servers
+            all_servers = protonvpn_api.get_all_servers()
+            if not all_servers:
+                return jsonify({
+                    'success': False,
+                    'error': 'No servers available'
+                }), 404
+            
+            # Filter chỉ lấy servers online
+            online_servers = [s for s in all_servers if s.get('status') == 'online']
+            if not online_servers:
+                online_servers = all_servers  # Fallback nếu không có online
+            
+            # Chọn random một server
+            import random
+            server = random.choice(online_servers)
+            
+            # Lấy hostname
+            proxy_host = server.get('domain', '')
+            if not proxy_host:
+                return jsonify({
+                    'success': False,
+                    'error': 'Server domain not found'
+                }), 500
+            
+            # Tính proxy port từ label
+            proxy_port = 4443
+            if 'servers' in server and len(server['servers']) > 0:
+                try:
+                    label = int(server['servers'][0].get('label', '0'))
+                    proxy_port = 4443 + label
+                except (ValueError, TypeError):
+                    pass
+            
+            # Lấy credentials từ protonvpn_service
+            if not ProtonVpnServiceInstance:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN service not available. Please ensure protonvpn_service is properly configured.'
+                }), 500
+            
+            username = ProtonVpnServiceInstance.user_name
+            password = ProtonVpnServiceInstance.password
+            
+            if not username or not password:
+                return jsonify({
+                    'success': False,
+                    'error': 'ProtonVPN credentials not available. Please wait a moment and try again, or check protonvpn_service configuration.'
+                }), 500
+            
+            # Tạo proxy URL với format https://username:password@host:port
+            proxy_url = f"https://{username}:{password}@{proxy_host}:{proxy_port}"
+            
+            return jsonify({
+                'success': True,
+                'proxy': proxy_url,
+                'host': proxy_host,
+                'port': proxy_port,
+                'username': username,
+                'server': {
+                    'name': server.get('name', ''),
+                    'country': server.get('country_name', ''),
+                    'country_code': server.get('country_code', ''),
+                    'city': server.get('city', ''),
+                    'load': server.get('load', 0)
+                }
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
     @app.route('/api/protonvpn/apply/<port>', methods=['POST'])
     def api_protonvpn_apply_server(port):
         """Áp dụng ProtonVPN server vào gost port"""
@@ -229,7 +313,7 @@ def register_protonvpn_routes(app, save_gost_config, run_command, trigger_health
                 used_proxies = set()
                 try:
                     import requests
-                    response = requests.get("https://g.proxyit.online/api/profiles/list-proxy", timeout=5)
+                    response = requests.get("https://g.proxyit.online/api/profiles/list-proxy", timeout=10)
                     if response.status_code == 200:
                         data = response.json()
                         if isinstance(data, dict) and 'data' in data:
