@@ -438,7 +438,7 @@ def api_test_proxy(port):
                 'https': f'socks5://127.0.0.1:{port}'
             }
             
-            response = requests.get('https://api.ipify.org', 
+            response = requests.get('https://ipinfo.io/ip', 
                                   proxies=proxies, 
                                   timeout=10)
             

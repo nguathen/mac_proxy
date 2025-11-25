@@ -367,7 +367,13 @@ EOF
                         # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
                         local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                         # Forwarder với timeout tối ưu và buffer lớn hơn
-                        local forwarder_opts="$proxy_url?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                        # Chuyển đổi https:// thành http+tls:// cho gost forwarder (theo tài liệu gost)
+                        local forwarder_url="$proxy_url"
+                        if [[ "$forwarder_url" == https://* ]]; then
+                            forwarder_url="${forwarder_url#https://}"
+                            forwarder_url="http+tls://${forwarder_url}"
+                        fi
+                        local forwarder_opts="${forwarder_url}?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -377,9 +383,15 @@ EOF
                         log "✅ Gost on port $port started with ProtonVPN optimizations (PID: $pid, proxy: $proxy_url)"
                     else
                         # Default settings cho các provider khác
+                        # Chuyển đổi https:// thành http+tls:// cho gost forwarder (theo tài liệu gost)
+                        local forwarder_url="$proxy_url"
+                        if [[ "$forwarder_url" == https://* ]]; then
+                            forwarder_url="${forwarder_url#https://}"
+                            forwarder_url="http+tls://${forwarder_url}"
+                        fi
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
-                        nohup $GOST_BIN -D -L socks5://:$port -F "$proxy_url" >> "$LOG_DIR/gost_${port}.log" 2>&1 &
+                        nohup $GOST_BIN -D -L socks5://:$port -F "$forwarder_url" >> "$LOG_DIR/gost_${port}.log" 2>&1 &
                         local pid=$!
                         echo $pid > "$pid_file"
                         log "✅ Gost on port $port started (PID: $pid, proxy: $proxy_url)"
@@ -577,7 +589,13 @@ restart_gost_port() {
                 # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
                 local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                 # Forwarder với timeout tối ưu và buffer lớn hơn
-                local forwarder_opts="$proxy_url?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                # Chuyển đổi https:// thành http+tls:// cho gost forwarder (theo tài liệu gost)
+                local forwarder_url="$proxy_url"
+                if [[ "$forwarder_url" == https://* ]]; then
+                    forwarder_url="${forwarder_url#https://}"
+                    forwarder_url="http+tls://${forwarder_url}"
+                fi
+                local forwarder_opts="${forwarder_url}?ttl=75s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"
@@ -608,7 +626,7 @@ status_gost() {
                 any_running=true
                 
                 # Test connection
-                if timeout 15 bash -c "curl -s --max-time 10 -x socks5h://127.0.0.1:$port https://api.ipify.org" &>/dev/null; then
+                if timeout 15 bash -c "curl -s --max-time 10 -x socks5h://127.0.0.1:$port https://ipinfo.io/ip" &>/dev/null; then
                     log "     🌐 Connection: OK"
                 else
                     log "     ⚠️  Connection: Failed (may need more time to establish)"

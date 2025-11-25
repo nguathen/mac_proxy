@@ -160,7 +160,7 @@ class ProxyAPI:
             result = subprocess.run([
                 'curl', '-s', '--max-time', str(timeout),
                 '--proxy', proxy_url,
-                'https://api.ipify.org'
+                'https://ipinfo.io/ip'
             ], capture_output=True, text=True, timeout=timeout)
             
             return result.returncode == 0 and result.stdout.strip()

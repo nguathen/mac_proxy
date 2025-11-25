@@ -232,7 +232,7 @@ curl -X POST http://localhost:5000/api/nordvpn/apply/7891 \
   -d '{"server_name": "Japan #720"}'
 
 # Test connection
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # Kiểm tra IP
 curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/json
@@ -264,7 +264,7 @@ tail -f logs/gost_7891.log
 
 # Test proxy URL trực tiếp
 curl -x https://USMbUonbFpF9xEx8xR3MHSau:buKKKPURZNMTW7A6rwm3qtBn@jp720.nordvpn.com:89 \
-  https://api.ipify.org
+  https://ipinfo.io/ip
 
 # Restart Gost
 ./manage_gost.sh restart
@@ -326,7 +326,7 @@ curl -X POST http://localhost:5000/api/nordvpn/apply/7891 \
   -d '{"server_name": "United States #1234"}'
 
 # Test
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 ```
 
 ### Example 2: List servers ở Japan
@@ -360,8 +360,8 @@ curl -X POST http://localhost:5000/api/nordvpn/apply/7893 \
   -d '{"server_name": "Singapore #528"}'
 
 # Test tất cả
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org  # US IP
-curl -x socks5h://127.0.0.1:7892 https://api.ipify.org  # JP IP
-curl -x socks5h://127.0.0.1:7893 https://api.ipify.org  # SG IP
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip  # US IP
+curl -x socks5h://127.0.0.1:7892 https://ipinfo.io/ip  # JP IP
+curl -x socks5h://127.0.0.1:7893 https://ipinfo.io/ip  # SG IP
 ```
 

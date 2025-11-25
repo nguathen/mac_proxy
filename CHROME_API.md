@@ -279,7 +279,7 @@ curl -X POST http://localhost:5000/api/chrome/proxy-check \
 ./manage_gost.sh status
 
 # 3. Test connection
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # 4. Kiểm tra config
 ./manage_gost.sh show-config
@@ -375,7 +375,7 @@ tail -f logs/gost_7891.log
 ./manage_gost.sh show-config
 
 # Test proxy
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # Restart Gost
 ./manage_gost.sh restart

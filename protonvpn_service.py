@@ -75,8 +75,8 @@ class ProtonVpnService:
         # Gọi load() khi khởi động
         self.load()
         
-        # Bắt đầu auto-load mỗi 5 phút
-        self.start_auto_load()
+        # Bắt đầu auto-load mỗi 2 phút
+        self.start_auto_load(interval_minutes=2)
     
     def _load_model(self) -> Optional[Dict]:
         """Load model từ file config_token.txt"""

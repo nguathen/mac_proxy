@@ -1101,7 +1101,7 @@
                         message += `• Local Port: ${proxyConfig.local_port}\n`;
                         message += `• Username: ${proxyConfig.username}\n\n`;
                         message += `Test with:\n`;
-                        message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://api.ipify.org`;
+                        message += `curl -x http://127.0.0.1:${proxyConfig.local_port} https://ipinfo.io/ip`;
                     } else {
                         // Gost - show SOCKS5 info, use port directly
                         const gostPort = data.port || port;
@@ -1109,7 +1109,7 @@
                         message += `• Type: SOCKS5 (Gost tunnel)\n`;
                         message += `• Local Port: ${gostPort}\n\n`;
                         message += `Test with:\n`;
-                        message += `curl -x socks5://127.0.0.1:${gostPort} https://api.ipify.org`;
+                        message += `curl -x socks5://127.0.0.1:${gostPort} https://ipinfo.io/ip`;
                     }
                     
                     alert(message);

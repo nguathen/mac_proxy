@@ -24,7 +24,7 @@ except ImportError:
 
 # Test URLs
 TEST_URLS = {
-    'small': 'https://api.ipify.org',  # ~20 bytes
+    'small': 'https://ipinfo.io/ip',  # ~20 bytes
     'medium': 'https://speed.cloudflare.com/__down?bytes=1048576',  # 1MB
     'large': 'https://speed.cloudflare.com/__down?bytes=10485760',  # 10MB
 }
@@ -289,7 +289,7 @@ def test_connection_https(proxy_url):
         # Sử dụng curl để test HTTPS proxy (requests không hỗ trợ tốt TLS in TLS)
         start_time = time.time()
         result = subprocess.run(
-            ['curl', '-s', '--proxy', proxy_url, '--max-time', '15', 'https://api.ipify.org'],
+            ['curl', '-s', '--proxy', proxy_url, '--max-time', '15', 'https://ipinfo.io/ip'],
             capture_output=True,
             text=True,
             timeout=20
@@ -329,7 +329,7 @@ def test_connection_socks5(proxy_host, proxy_port):
         }
         
         start_time = time.time()
-        response = requests.get('https://api.ipify.org', proxies=proxies, timeout=15)
+        response = requests.get('https://ipinfo.io/ip', proxies=proxies, timeout=15)
         end_time = time.time()
         
         if response.status_code == 200:

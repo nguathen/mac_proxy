@@ -116,8 +116,8 @@ if kill -0 "$GOST_PID" 2>/dev/null; then
     echo "🧪 Testing proxy connection..."
     
     # Test the proxy
-    if curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://api.ipify.org >/dev/null 2>&1; then
-        IP=$(curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://api.ipify.org 2>/dev/null || echo "N/A")
+    if curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://ipinfo.io/ip >/dev/null 2>&1; then
+        IP=$(curl -s --connect-timeout 5 --max-time 10 -x "socks5h://127.0.0.1:$PORT" https://ipinfo.io/ip 2>/dev/null || echo "N/A")
         echo "✅ Proxy is working!"
         echo "   Your IP through proxy: $IP"
         echo ""

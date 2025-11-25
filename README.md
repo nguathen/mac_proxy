@@ -121,11 +121,11 @@ pip3 install -r webui/requirements.txt
 
 ```bash
 # Test proxy
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
-curl -x socks5h://127.0.0.1:7892 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
+curl -x socks5h://127.0.0.1:7892 https://ipinfo.io/ip
 
 # Test WARP fallback
-curl -x socks5h://127.0.0.1:7890 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7890 https://ipinfo.io/ip
 ```
 
 ## 🌍 NordVPN
@@ -265,7 +265,7 @@ warp-cli set-proxy-port 8111
 warp-cli connect
 
 # Kiểm tra
-curl -x socks5h://127.0.0.1:8111 https://api.ipify.org
+curl -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip
 ```
 
 ### Auto Credential Updater
@@ -335,7 +335,7 @@ warp-cli disconnect
 warp-cli connect
 
 # Test
-curl -x socks5h://127.0.0.1:8111 https://api.ipify.org
+curl -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip
 ```
 
 ## 📝 Port Ranges

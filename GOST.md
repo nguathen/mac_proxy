@@ -188,10 +188,10 @@ sudo journalctl -u gost-7890-monitor -f
 
 ```bash
 # Test connection
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # Test với timeout
-curl --max-time 10 -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl --max-time 10 -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # Kiểm tra IP location
 curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/json
@@ -279,7 +279,7 @@ grep "USMbUonbFpF9xEx8xR3MHSau" manage_gost.sh
 
 ```bash
 # Kiểm tra upstream proxy
-curl -x https://user:pass@host:port https://api.ipify.org
+curl -x https://user:pass@host:port https://ipinfo.io/ip
 
 # Tăng timeout trong Gost
 # Edit manage_gost.sh, thêm ?ttl=120s
@@ -326,7 +326,7 @@ pkill -f gost_monitor.sh
 ./manage_gost.sh start
 
 # 3. Test
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # 4. Kiểm tra logs
 tail -f logs/gost_7891.log
@@ -342,7 +342,7 @@ tail -f logs/gost_7891.log
 ./manage_gost.sh start
 
 # 3. Test
-curl -x socks5h://127.0.0.1:7892 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7892 https://ipinfo.io/ip
 ```
 
 ### Example 3: Setup WARP fallback
@@ -358,7 +358,7 @@ warp-cli status
 ./manage_gost.sh start
 
 # 4. Test
-curl -x socks5h://127.0.0.1:7890 https://api.ipify.org
+curl -x socks5h://127.0.0.1:7890 https://ipinfo.io/ip
 ```
 
 ### Example 4: Multiple instances
@@ -373,9 +373,9 @@ curl -x socks5h://127.0.0.1:7890 https://api.ipify.org
 ./manage_gost.sh start
 
 # Test tất cả
-curl -x socks5h://127.0.0.1:7891 https://api.ipify.org  # JP IP
-curl -x socks5h://127.0.0.1:7892 https://api.ipify.org  # US IP
-curl -x socks5h://127.0.0.1:7893 https://api.ipify.org  # UK IP
+curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip  # JP IP
+curl -x socks5h://127.0.0.1:7892 https://ipinfo.io/ip  # US IP
+curl -x socks5h://127.0.0.1:7893 https://ipinfo.io/ip  # UK IP
 ```
 
 ## 🚀 Auto-start
@@ -417,14 +417,14 @@ crontab -e
 
 ```bash
 # Test latency
-time curl -x socks5h://127.0.0.1:7891 https://api.ipify.org
+time curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip
 
 # Test throughput
 curl -x socks5h://127.0.0.1:7891 -o /dev/null https://speed.cloudflare.com/__down?bytes=100000000
 
 # Test concurrent connections
 for i in {1..10}; do
-  curl -x socks5h://127.0.0.1:7891 https://api.ipify.org &
+  curl -x socks5h://127.0.0.1:7891 https://ipinfo.io/ip &
 done
 wait
 ```

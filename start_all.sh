@@ -143,7 +143,7 @@ echo "   • Xem logs: tail -f logs/gost_*.log"
 for config_file in config/gost_*.config; do
     if [ -f "$config_file" ]; then
         port=$(basename "$config_file" .config | sed 's/gost_//')
-        echo "   • Test SOCKS5 proxy $port: curl -x socks5h://127.0.0.1:$port https://api.ipify.org"
+        echo "   • Test SOCKS5 proxy $port: curl -x socks5h://127.0.0.1:$port https://ipinfo.io/ip"
     fi
 done
 echo ""

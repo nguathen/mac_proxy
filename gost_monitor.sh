@@ -49,7 +49,7 @@ check_gost_proxy() {
     # Port 7890 (WARP) cần timeout dài hơn vì forward qua WARP có thể chậm hơn
     if [ "$port" = "7890" ]; then
         # Timeout dài hơn cho WARP: connect-timeout 10s, max-time 15s
-        if curl -s --connect-timeout 10 --max-time 15 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
+        if curl -s --connect-timeout 10 --max-time 15 -x socks5h://127.0.0.1:$port https://ipinfo.io/ip >/dev/null 2>&1; then
             return 0  # Working
         else
             return 1  # Not working
@@ -58,7 +58,7 @@ check_gost_proxy() {
         # Kiểm tra proxy có hoạt động không (với timeout tối ưu cho ProtonVPN)
         # Tăng timeout lên để phù hợp với ProtonVPN (có thể chậm hơn do distance)
         # Dùng curl với timeout options: connect-timeout 8s, max-time 12s
-        if curl -s --connect-timeout 8 --max-time 12 -x socks5h://127.0.0.1:$port https://api.ipify.org >/dev/null 2>&1; then
+        if curl -s --connect-timeout 8 --max-time 12 -x socks5h://127.0.0.1:$port https://ipinfo.io/ip >/dev/null 2>&1; then
             return 0  # Working
         else
             return 1  # Not working

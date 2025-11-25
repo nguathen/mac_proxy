@@ -56,7 +56,7 @@ done
 echo ""
 echo "☁️  Cloudflare WARP (Fallback):"
 if nc -z 127.0.0.1 8111 2>/dev/null; then
-    ip=$(curl -s --max-time 5 -x socks5h://127.0.0.1:8111 https://api.ipify.org 2>/dev/null || echo "N/A")
+    ip=$(curl -s --max-time 5 -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip 2>/dev/null || echo "N/A")
     if [ "$ip" != "N/A" ]; then
         echo "  ✅ WARP proxy (port 8111): Online (IP: $ip)"
     else
@@ -73,7 +73,7 @@ for config_file in config/gost_*.config; do
     if [ -f "$config_file" ]; then
         port=$(basename "$config_file" .config | sed 's/gost_//')
         if nc -z 127.0.0.1 $port 2>/dev/null; then
-            ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} https://api.ipify.org 2>/dev/null || echo "N/A")
+            ip=$(curl -s --max-time 8 -x socks5h://127.0.0.1:${port} https://ipinfo.io/ip 2>/dev/null || echo "N/A")
             if [ "$ip" != "N/A" ]; then
                 echo "  ✅ Gost port $port: Working (IP: $ip)"
             else

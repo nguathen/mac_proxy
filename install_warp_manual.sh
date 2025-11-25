@@ -72,7 +72,7 @@ if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
     echo "   2. Enable proxy mode: warp-cli proxy enable"
     echo "   3. Set proxy port: warp-cli proxy port 8111"
     echo "   4. Connect: warp-cli connect"
-    echo "   5. Test: curl -x socks5h://127.0.0.1:8111 https://api.ipify.org"
+    echo "   5. Test: curl -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip"
     echo ""
 else
     echo "❌ Unsupported OS: $OS"

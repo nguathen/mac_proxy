@@ -75,7 +75,7 @@ if systemctl is-active --quiet gost-7890-monitor.service; then
     echo "   • Disable autostart: systemctl disable gost-7890-monitor"
     echo ""
     echo "🧪 Test proxy:"
-    echo "   curl -x socks5h://127.0.0.1:7890 https://api.ipify.org"
+    echo "   curl -x socks5h://127.0.0.1:7890 https://ipinfo.io/ip"
     echo ""
 else
     echo "❌ Service không chạy. Kiểm tra logs:"

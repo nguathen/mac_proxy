@@ -244,7 +244,7 @@ if echo "$WARP_STATUS" | grep -qi "connected"; then
         
         # Test proxy connection
         log_info "Testing WARP proxy..."
-        TEST_IP=$(curl -s --connect-timeout 5 --max-time 10 -x socks5h://127.0.0.1:8111 https://api.ipify.org 2>/dev/null || echo "")
+        TEST_IP=$(curl -s --connect-timeout 5 --max-time 10 -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip 2>/dev/null || echo "")
         if [ -n "$TEST_IP" ]; then
             log_success "WARP proxy is working! Your IP: $TEST_IP"
         else
@@ -252,7 +252,7 @@ if echo "$WARP_STATUS" | grep -qi "connected"; then
         fi
     else
         log_warning "WARP connected but proxy port 8111 not ready yet"
-        log_info "Wait a few seconds and try: curl -x socks5h://127.0.0.1:8111 https://api.ipify.org"
+        log_info "Wait a few seconds and try: curl -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip"
     fi
 else
     log_warning "WARP may not be connected yet"
@@ -269,6 +269,6 @@ echo "   • Check status: warp-cli status"
 echo "   • Check proxy: warp-cli proxy status"
 echo "   • Connect: warp-cli connect"
 echo "   • Disconnect: warp-cli disconnect"
-echo "   • Test proxy: curl -x socks5h://127.0.0.1:8111 https://api.ipify.org"
+echo "   • Test proxy: curl -x socks5h://127.0.0.1:8111 https://ipinfo.io/ip"
 echo ""
 

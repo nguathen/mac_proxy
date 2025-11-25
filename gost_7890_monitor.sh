@@ -51,7 +51,7 @@ check_gost_port() {
 check_gost_functionality() {
     # Kiểm tra Gost có hoạt động không bằng cách test proxy
     # Port 7890 (WARP) cần timeout dài hơn vì forward qua WARP có thể chậm hơn
-    if curl -s --connect-timeout 10 --max-time 15 -x "socks5h://127.0.0.1:$GOST_PORT" https://api.ipify.org >/dev/null 2>&1; then
+    if curl -s --connect-timeout 10 --max-time 15 -x "socks5h://127.0.0.1:$GOST_PORT" https://ipinfo.io/ip >/dev/null 2>&1; then
         return 0  # Working
     else
         return 1  # Not working
