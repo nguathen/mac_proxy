@@ -125,7 +125,12 @@ class AutoCredentialUpdater:
         protonvpn_configs = self._find_protonvpn_configs()
         
         for config_file in protonvpn_configs:
-            if self._has_authentication_errors(config_file):
+            # Kiểm tra token expiration trước (proactive)
+            if self._is_token_expired_or_expiring_soon(config_file):
+                print(f"🔄 Token expired or expiring soon for {config_file}, updating credentials...")
+                self._update_credentials_for_config(config_file)
+            # Kiểm tra lỗi authentication trong log (reactive)
+            elif self._has_authentication_errors(config_file):
                 print(f"🔄 Detected auth errors for {config_file}, updating credentials...")
                 self._update_credentials_for_config(config_file)
                 
@@ -177,11 +182,62 @@ class AutoCredentialUpdater:
                     print(f"🔍 Found {auth_error_count} authentication errors (407) for port {port}")
                     return True
                 
-                if timeout_error_count >= 5:
-                    print(f"⚠️  Found {timeout_error_count} timeout errors for port {port} (server may be down)")
+                if timeout_error_count >= 3:  # Giảm từ 5 xuống 3 để phát hiện sớm hơn
+                    print(f"⚠️  Found {timeout_error_count} timeout errors for port {port} (may be auth issue)")
+                    return True  # Return True để trigger update
                     
         except Exception as e:
             print(f"❌ Error reading log file {log_file}: {e}")
+            
+        return False
+    
+    def _is_token_expired_or_expiring_soon(self, config_file: str) -> bool:
+        """Kiểm tra xem token có hết hạn hoặc sắp hết hạn không (proactive check)"""
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            proxy_url = config.get('proxy_url', '')
+            if not proxy_url or 'https://' not in proxy_url:
+                return False
+            
+            # Extract credentials từ proxy_url
+            try:
+                creds_part = proxy_url.split('https://')[1].split('@')[0]
+                user, pwd = creds_part.split(':', 1)
+                
+                # Decode JWT token payload (second part)
+                import base64
+                parts = user.split('.')
+                if len(parts) >= 2:
+                    payload = parts[1]
+                    # Add padding if needed
+                    payload += '=' * (4 - len(payload) % 4)
+                    decoded_bytes = base64.urlsafe_b64decode(payload)
+                    decoded = json.loads(decoded_bytes)
+                    exp = decoded.get('exp', 0)
+                    
+                    if exp:
+                        exp_time = datetime.fromtimestamp(exp)
+                        now = datetime.now()
+                        time_until_expiry = (exp_time - now).total_seconds()
+                        
+                        # Cập nhật nếu đã hết hạn hoặc còn < 5 phút
+                        if time_until_expiry < 300:  # 5 phút
+                            port = self._extract_port_from_config_file(config_file)
+                            if port:
+                                if time_until_expiry < 0:
+                                    hours_ago = abs(time_until_expiry) / 3600
+                                    print(f"⏰ Token for port {port} expired {hours_ago:.2f} hours ago")
+                                else:
+                                    print(f"⏰ Token for port {port} expiring in {time_until_expiry/60:.1f} minutes")
+                            return True
+            except (ValueError, IndexError, json.JSONDecodeError, base64.binascii.Error) as e:
+                # Nếu không parse được token, không coi là expired
+                pass
+                
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"❌ Error checking token expiration for {config_file}: {e}")
             
         return False
     
