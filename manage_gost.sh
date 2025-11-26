@@ -365,7 +365,7 @@ EOF
                         # - so_rcvbuf=131072: tăng receive buffer size lên 128KB (tăng từ 64KB để tăng throughput)
                         # - so_sndbuf=131072: tăng send buffer size lên 128KB (tăng từ 64KB để tăng throughput)
                         # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
-                        local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                        local listener_opts="socks5://:$port?ttl=90s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                         # Forwarder với timeout tối ưu và buffer lớn hơn
                         # Chuyển đổi https:// thành http+tls:// cho gost forwarder (theo tài liệu gost)
                         local forwarder_url="$proxy_url"
@@ -373,7 +373,7 @@ EOF
                             forwarder_url="${forwarder_url#https://}"
                             forwarder_url="http+tls://${forwarder_url}"
                         fi
-                        local forwarder_opts="${forwarder_url}?ttl=120s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false"
+                        local forwarder_opts="${forwarder_url}?ttl=180s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false&timeout=30s"
                         # Rotate log nếu cần trước khi start
                         rotate_log_if_needed "$LOG_DIR/gost_${port}.log"
                         cleanup_old_logs "$LOG_DIR/gost_${port}.log"
@@ -587,7 +587,7 @@ restart_gost_port() {
                 # - so_rcvbuf=131072: tăng receive buffer size lên 128KB (tăng từ 64KB để tăng throughput)
                 # - so_sndbuf=131072: tăng send buffer size lên 128KB (tăng từ 64KB để tăng throughput)
                 # - nodelay=true: enable TCP_NODELAY để giảm latency cho request nhỏ
-                local listener_opts="socks5://:$port?ttl=45s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
+                local listener_opts="socks5://:$port?ttl=90s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true"
                 # Forwarder với timeout tối ưu và buffer lớn hơn
                 # Chuyển đổi https:// thành http+tls:// cho gost forwarder (theo tài liệu gost)
                 local forwarder_url="$proxy_url"
@@ -595,7 +595,7 @@ restart_gost_port() {
                     forwarder_url="${forwarder_url#https://}"
                     forwarder_url="http+tls://${forwarder_url}"
                 fi
-                local forwarder_opts="${forwarder_url}?ttl=120s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false"
+                local forwarder_opts="${forwarder_url}?ttl=180s&so_keepalive=true&so_keepalive_time=15s&so_keepalive_intvl=5s&so_keepalive_probes=3&so_rcvbuf=131072&so_sndbuf=131072&nodelay=true&secure=false&timeout=30s"
                 nohup $GOST_BIN -D -L "$listener_opts" -F "$forwarder_opts" > "$LOG_DIR/gost_${port}.log" 2>&1 &
                 local pid=$!
                 echo $pid > "$pid_file"

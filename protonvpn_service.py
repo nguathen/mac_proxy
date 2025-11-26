@@ -75,8 +75,8 @@ class ProtonVpnService:
         # Gọi load() khi khởi động
         self.load()
         
-        # Bắt đầu auto-load mỗi 2 phút
-        self.start_auto_load(interval_minutes=2)
+        # Bắt đầu auto-load mỗi 30 giây
+        self.start_auto_load(interval_seconds=30)
     
     def _load_model(self) -> Optional[Dict]:
         """Load model từ file config_token.txt"""
@@ -137,7 +137,7 @@ class ProtonVpnService:
         
         while retry_count < max_retries:
             try:
-                url = "https://account.proton.me/api/vpn/v1/browser/token?Duration=120000"
+                url = "https://account.proton.me/api/vpn/v1/browser/token?Duration=600000"
                 response = requests.get(url, headers=self.dic, timeout=30)
                 
                 json_data = response.text
@@ -169,18 +169,24 @@ class ProtonVpnService:
                 return
     
     
-    def start_auto_load(self, interval_minutes: int = 5) -> None:
-        """Bắt đầu auto-load credentials mỗi N phút"""
+    def start_auto_load(self, interval_seconds: int = 30, interval_minutes: Optional[int] = None) -> None:
+        """Bắt đầu auto-load credentials mỗi N giây (hoặc N phút nếu dùng interval_minutes)"""
         with self._auto_load_lock:
             if self._auto_load_running:
                 return
             
             self._auto_load_running = True
         
+        # Hỗ trợ cả interval_minutes (backward compatibility) và interval_seconds
+        if interval_minutes is not None:
+            sleep_interval = interval_minutes * 60
+        else:
+            sleep_interval = interval_seconds
+        
         def _auto_load_loop():
             while self._auto_load_running:
                 try:
-                    time.sleep(interval_minutes * 60)  # Chuyển phút thành giây
+                    time.sleep(sleep_interval)
                     if self._auto_load_running:
                         self.load()
                 except Exception as e:
@@ -285,7 +291,7 @@ if __name__ == "__main__":
     
     # Giữ chương trình chạy để test auto-load
     try:
-        print("\nAuto-load is running every 5 minutes. Press Ctrl+C to stop.")
+        print("\nAuto-load is running every 30 seconds. Press Ctrl+C to stop.")
         while True:
             time.sleep(60)
             if service.user_name and service.password:
