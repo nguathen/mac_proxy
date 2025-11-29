@@ -386,6 +386,13 @@ def api_protonvpn_credentials():
                 'error': 'protonvpn_service not available'
             }), 500
         
+        # Refresh credentials trước khi trả về để đảm bảo có credentials mới nhất
+        try:
+            ProtonVpnServiceInstance.load()
+        except Exception as load_error:
+            # Nếu load() fail, vẫn trả về credentials hiện có (có thể là credentials cũ)
+            print(f"Warning: Failed to refresh credentials: {load_error}")
+        
         username = ProtonVpnServiceInstance.user_name
         password = ProtonVpnServiceInstance.password
         
