@@ -158,12 +158,45 @@ update_all_protonvpn_auth() {
     # Tìm tất cả ProtonVPN config files
     for config_file in "$CONFIG_DIR"/gost_*.config; do
         if [ -f "$config_file" ]; then
-            local provider=$(cat "$config_file" | jq -r '.provider // ""' 2>/dev/null || echo "")
+            # Parse JSON using jq or Python fallback
+            local provider=""
+            local country=""
+            local proxy_host=""
+            local proxy_port=""
+            local proxy_url=""
+            
+            if command -v jq &> /dev/null; then
+                provider=$(cat "$config_file" | jq -r '.provider // ""' 2>/dev/null || echo "")
+                country=$(cat "$config_file" | jq -r '.country // ""' 2>/dev/null || echo "")
+                proxy_host=$(cat "$config_file" | jq -r '.proxy_host // ""' 2>/dev/null || echo "")
+                proxy_port=$(cat "$config_file" | jq -r '.proxy_port // ""' 2>/dev/null || echo "")
+                proxy_url=$(cat "$config_file" | jq -r '.proxy_url // ""' 2>/dev/null || echo "")
+            else
+                # Use Python as fallback
+                provider=$(python3 -c "import sys, json; data=json.load(open('$config_file')); print(data.get('provider', '') or '')" 2>/dev/null || echo "")
+                country=$(python3 -c "import sys, json; data=json.load(open('$config_file')); print(data.get('country', '') or '')" 2>/dev/null || echo "")
+                proxy_host=$(python3 -c "import sys, json; data=json.load(open('$config_file')); print(data.get('proxy_host', '') or '')" 2>/dev/null || echo "")
+                proxy_port=$(python3 -c "import sys, json; data=json.load(open('$config_file')); print(data.get('proxy_port', '') or '')" 2>/dev/null || echo "")
+                proxy_url=$(python3 -c "import sys, json; data=json.load(open('$config_file')); print(data.get('proxy_url', '') or '')" 2>/dev/null || echo "")
+            fi
+            
             if [ "$provider" = "protonvpn" ]; then
                 local port=$(basename "$config_file" | sed 's/gost_\(.*\)\.config/\1/')
-                local country=$(cat "$config_file" | jq -r '.country // ""' 2>/dev/null || echo "")
-                local proxy_host=$(cat "$config_file" | jq -r '.proxy_host // ""' 2>/dev/null || echo "")
-                local proxy_port=$(cat "$config_file" | jq -r '.proxy_port // ""' 2>/dev/null || echo "")
+                
+                # Extract proxy_host and proxy_port from proxy_url if not present
+                if [ -z "$proxy_host" ] || [ -z "$proxy_port" ]; then
+                    if [ -n "$proxy_url" ] && [[ "$proxy_url" == https://* ]]; then
+                        # Extract from proxy_url format: https://token@host:port
+                        local url_part="${proxy_url#https://}"
+                        if [[ "$url_part" == *"@"* ]]; then
+                            local server_part="${url_part#*@}"
+                            if [[ "$server_part" == *":"* ]]; then
+                                proxy_host="${server_part%%:*}"
+                                proxy_port="${server_part#*:}"
+                            fi
+                        fi
+                    fi
+                fi
                 
                 if [ -n "$proxy_host" ] && [ -n "$proxy_port" ]; then
                     # Tạo proxy URL mới với auth token mới
@@ -171,11 +204,18 @@ update_all_protonvpn_auth() {
                     
                     # Cập nhật config file
                     local temp_file=$(mktemp)
-                    cat "$config_file" | jq --arg new_url "$new_proxy_url" '.proxy_url = $new_url' > "$temp_file"
+                    if command -v jq &> /dev/null; then
+                        cat "$config_file" | jq --arg new_url "$new_proxy_url" '.proxy_url = $new_url' > "$temp_file"
+                    else
+                        # Use Python as fallback
+                        python3 -c "import sys, json; data=json.load(open('$config_file')); data['proxy_url'] = '$new_proxy_url'; json.dump(data, open('$temp_file', 'w'), indent=2)" 2>/dev/null
+                    fi
                     mv "$temp_file" "$config_file"
                     
                     log "✅ Updated auth for port $port ($country)"
                     updated_count=$((updated_count + 1))
+                else
+                    log "⚠️  Could not extract proxy_host/proxy_port for port $port, skipping..."
                 fi
             fi
         fi
